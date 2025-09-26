@@ -1,41 +1,14 @@
-# Prerequisites
-*.d
+# Devenv
+.devenv*
+devenv.local.nix
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# direnv
+.direnv
 
-# Precompiled Headers
-*.gch
-*.pch
+# pre-commit
+.pre-commit-config.yaml
 
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
+# Build
+build/
+.cache/
+.compile_commands.json
