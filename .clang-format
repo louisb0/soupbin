@@ -4,6 +4,7 @@ ColumnLimit: 125
 AccessModifierOffset: -4
 NamespaceIndentation: Inner
 Cpp11BracedListStyle: false
+AlwaysBreakTemplateDeclarations: Yes
 
 SortIncludes: CaseSensitive
 IncludeBlocks: Regroup
@@ -13,22 +14,27 @@ IncludeCategories:
     SortPriority: 1
     CaseSensitive: true
 
-  - Regex: '^"detail/'
+  - Regex: '^"common/'
     Priority: 2
     SortPriority: 2
     CaseSensitive: true
 
-  - Regex: '^<[^.]*>$'
+  - Regex: '^"'
     Priority: 3
     SortPriority: 3
     CaseSensitive: true
 
-  - Regex: '^<.*\.h>$'
+  - Regex: '^<[^.]*>$'
     Priority: 4
     SortPriority: 4
     CaseSensitive: true
 
-  - Regex: '.*'
+  - Regex: '^<.*\.h>$'
     Priority: 5
     SortPriority: 5
+    CaseSensitive: true
+
+  - Regex: '.*'
+    Priority: 6
+    SortPriority: 6
     CaseSensitive: true

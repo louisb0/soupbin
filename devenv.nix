@@ -29,14 +29,22 @@
 
   scripts = {
     setup.exec = ''
-      BUILD_TYPE=''${1:-debug}
-      BUILD_TYPE=$(echo $BUILD_TYPE | tr '[:upper:]' '[:lower:]')
+      if [ -z "$1" ]; then
+        echo "Usage: setup <debug|release|profile>"
+        exit 1
+      fi
+
+      BUILD_TYPE=$(echo $1 | tr '[:upper:]' '[:lower:]')
 
       case $BUILD_TYPE in
         debug)   CMAKE_BUILD_TYPE=Debug ;;
         release) CMAKE_BUILD_TYPE=Release ;;
         profile) CMAKE_BUILD_TYPE=Profile ;;
-        *) echo "Unknown build type: $BUILD_TYPE"; exit 1 ;;
+        *)
+          echo "Error: Unknown build type '$1'"
+          echo "Valid options: debug, release, profile"
+          exit 1
+          ;;
       esac
 
       mkdir -p build/$BUILD_TYPE
@@ -46,29 +54,47 @@
     '';
 
     build.exec = ''
-      BUILD_TYPE=''${1:-debug}
-      BUILD_TYPE=$(echo $BUILD_TYPE | tr '[:upper:]' '[:lower:]')
+      if [ -z "$1" ]; then
+        echo "Usage: build <debug|release|profile>"
+        exit 1
+      fi
 
-      setup $BUILD_TYPE
-      cmake --build build/$BUILD_TYPE
+      BUILD_TYPE=$(echo $1 | tr '[:upper:]' '[:lower:]')
+
+      case $BUILD_TYPE in
+        debug|release|profile)
+          setup $BUILD_TYPE
+          cmake --build build/$BUILD_TYPE
+          ;;
+        *)
+          echo "Error: Unknown build type '$1'"
+          echo "Valid options: debug, release, profile"
+          exit 1
+          ;;
+      esac
     '';
 
     clean.exec = ''
-      BUILD_TYPE=''${1:-debug}
-      BUILD_TYPE=$(echo $BUILD_TYPE | tr '[:upper:]' '[:lower:]')
+      if [ -z "$1" ]; then
+        echo "Usage: clean <debug|release|profile|all>"
+        exit 1
+      fi
 
-      rm -rf build/$BUILD_TYPE
-    '';
+      BUILD_TYPE=$(echo $1 | tr '[:upper:]' '[:lower:]')
 
-    # Convenience
-    bdebug.exec = ''
-      build debug
-    '';
-    brelease.exec = ''
-      build release
-    '';
-    bprofile.exec = ''
-      build profile
+      case $BUILD_TYPE in
+        debug|release|profile)
+          rm -rf build/$BUILD_TYPE
+          ;;
+        all)
+          rm -rf build
+          ;;
+        *)
+          echo "Error: Unknown build type '$1'"
+          echo "Valid options: debug, release, profile, all"
+          exit 1
+          ;;
+      esac
     '';
   };
 }
