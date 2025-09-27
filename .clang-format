@@ -9,6 +9,11 @@ AlwaysBreakTemplateDeclarations: Yes
 SortIncludes: CaseSensitive
 IncludeBlocks: Regroup
 IncludeCategories:
+  - Regex: '^<gtest/'
+    Priority: 0
+    SortPriority: 0
+    CaseSensitive: true
+
   - Regex: '^[<"]soupbin/'
     Priority: 1
     SortPriority: 1

@@ -96,5 +96,11 @@
           ;;
       esac
     '';
+
+    iwyu.exec = ''
+      output=$(iwyu_tool.py -p build/debug client/ server/ example/  2>&1 | grep -v "no private include name for @headername mapping")
+      echo "$output"
+      echo "$output" | grep -q "should add these lines:" && exit 1 || exit 0
+    '';
   };
 }
