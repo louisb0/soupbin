@@ -3,12 +3,14 @@
 #include "common/assert.hpp"
 #include "common/log.hpp"
 
+#include "session.hpp"
 #include "verify.hpp"
 
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <ranges>
+#include <unordered_set>
 
 #include <sys/epoll.h>
 #include <unistd.h>
@@ -19,6 +21,7 @@ client_store::client_store(valid_fd_t epoll, client_handle_t max_clients) noexce
     : epoll_(epoll), max_clients_(max_clients) {
     ASSERT(verify::fd(epoll));
     ASSERT(verify::epoll(epoll));
+    ASSERT(max_clients.get() > 0);
 
     loop_info_.reserve(max_clients.get());
     activity_info_.reserve(max_clients.get());
@@ -30,7 +33,7 @@ client_store::~client_store() {
     }
 }
 
-std::span<cl_loop_info *> client_store::ready(int timeout_ms) noexcept {
+client_store::ready_clients client_store::ready(int timeout_ms) noexcept {
     DEBUG_ASSERT(verify::epoll(epoll_));
     DEBUG_ASSERT(loop_info_.size() == activity_info_.size()); // SoA consistency.
 
@@ -60,12 +63,17 @@ std::span<cl_loop_info *> client_store::ready(int timeout_ms) noexcept {
     }
     // NOLINTEND(*-array-index)
 
-    // NOTE: Group by session so that clients on the same session are processed contiguously,
+    // NOTE: We group by session so that clients on the same session are processed contiguously,
     // keeping both our session data and the user's session-associated structures hot in cache.
     auto ready = std::span{ ready_buffer_.data(), nready };
     std::ranges::sort(ready, [](const auto *a, const auto *b) { return a->sess > b->sess; });
 
-    return ready;
+    size_t auth_end = 0;
+    while (auth_end < ready.size() && ready[auth_end]->authed()) {
+        auth_end++;
+    }
+
+    return { .authed = ready.subspan(0, auth_end), .unauthed = ready.subspan(auth_end) };
 }
 
 void client_store::add(std::span<const valid_fd_t> fds) noexcept {

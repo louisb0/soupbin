@@ -19,7 +19,7 @@ namespace soupbin {
 class session;
 
 struct cl_loop_info {
-    session *sess;
+    session *sess{};
     valid_fd_t fd;
     client_handle_t handle;
 
@@ -28,7 +28,7 @@ struct cl_loop_info {
         // TODO: Enforce this on the client callback.
         // TODO: Use the header size directly instead of 3.
         std::array<std::byte, 3 + (2UZ * constants::cache_line_bytes)> buf;
-    } partial;
+    } partial{};
 
     [[nodiscard]] bool authed() const noexcept { return sess != nullptr; }
 };
@@ -55,10 +55,16 @@ class client_store {
     std::vector<cl_loop_info> loop_info_;
     std::vector<cl_activity_info> activity_info_;
 
+    // TODO: Hidden usage of definitions.
     std::array<epoll_event, SOUPBIN_BATCH_SIZE> event_buffer_{};
     std::array<cl_loop_info *, SOUPBIN_BATCH_SIZE> ready_buffer_{};
 
 public:
+    struct ready_clients {
+        std::span<cl_loop_info *> authed;
+        std::span<cl_loop_info *> unauthed;
+    };
+
     [[nodiscard]] client_store(valid_fd_t epoll, client_handle_t max_clients) noexcept;
     ~client_store();
 
@@ -67,7 +73,7 @@ public:
     client_store(client_store &&) = delete;
     client_store &operator=(client_store &&) = delete;
 
-    [[nodiscard]] std::span<cl_loop_info *> ready(int timeout_ms) noexcept;
+    [[nodiscard]] ready_clients ready(int timeout_ms) noexcept;
     void add(std::span<const valid_fd_t>) noexcept;
     void remove(std::span<client_handle_t>) noexcept;
 
