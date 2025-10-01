@@ -23,7 +23,7 @@
     do {                                                                                                                    \
         if (!(condition)) [[unlikely]] { /* NOLINT(readability-simplify-boolean-expr) */                                    \
             auto loc = std::source_location::current();                                                                     \
-            spdlog::critical("[{}:{}] Assertion failed: " #condition, loc.function_name(), loc.line());                     \
+            spdlog::critical("[{}:{}] Assertion failed.", loc.function_name(), loc.line());                                 \
             std::abort();                                                                                                   \
         }                                                                                                                   \
     } while (0)
@@ -32,4 +32,14 @@
 #define DEBUG_ASSERT(condition) ((void)0)
 #else
 #define DEBUG_ASSERT(condition) ASSERT(condition)
+#endif
+
+#ifdef NFUZZ
+#define FUZZ_UNREACHABLE(condition) ((void)0)
+#else
+#define FUZZ_UNREACHABLE() ASSERT_UNREACHABLE()
+#endif
+
+#if !defined(NFUZZ) && defined(NDEBUG)
+#error "Fuzzing requires a debug build."
 #endif

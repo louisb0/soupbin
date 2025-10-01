@@ -1,10 +1,13 @@
 #include <gtest/gtest.h>
 
-#include "client_store.hpp"
-#include "session.hpp"
-#include "types.hpp"
+#include "detail/client_store.hpp"
+#include "detail/session.hpp"
+#include "detail/types.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <span>
 #include <string>
 
@@ -12,7 +15,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-using namespace soupbin;
+using namespace soupbin::detail;
 
 // NOLINTBEGIN
 TEST(ClientStore, SmokeTest) {
@@ -33,14 +36,14 @@ TEST(ClientStore, SmokeTest) {
     valid_fd_t clients_12[] = { client_fd1, client_fd2 };
     cstore.add(std::span{ clients_12, 2 });
     cstore.assert_consistency();
-    auto client1_activity = cstore.activity_info(client_handle_t{ 0 });
-    auto client2_activity = cstore.activity_info(client_handle_t{ 1 });
+    auto client1_activity = cstore.activity(client_handle_t{ 0 });
+    auto client2_activity = cstore.activity(client_handle_t{ 1 });
 
     // Add client3.
     valid_fd_t client_fd3{ static_cast<uint16_t>(fds3[0]) };
     cstore.add(std::span{ &client_fd3, 1 });
     cstore.assert_consistency();
-    auto client3_activity = cstore.activity_info(client_handle_t{ 2 });
+    auto client3_activity = cstore.activity(client_handle_t{ 2 });
 
     EXPECT_EQ(client2_activity.last_recv, client1_activity.last_recv);
     EXPECT_GT(client3_activity.last_recv, client2_activity.last_recv);
@@ -72,7 +75,7 @@ TEST(ClientStore, SmokeTest) {
     EXPECT_EQ(ready_after[0]->fd.get(), client_fd2.get());
 
     // Ensure activity info consistency.
-    auto remaining_activity = cstore.activity_info(client_handle_t{ 0 });
+    auto remaining_activity = cstore.activity(client_handle_t{ 0 });
     EXPECT_EQ(client2_activity.last_recv, remaining_activity.last_recv);
 
     // Remove client2.

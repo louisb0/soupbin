@@ -2,11 +2,13 @@
 
 #include "soupbin/server.hpp"
 
+#include "detail/constants.hpp"
+
 #include <cstdint>
 #include <limits>
 #include <utility>
 
-namespace soupbin {
+namespace soupbin::detail {
 
 template <typename T, typename Tag>
 class strong_type {
@@ -18,13 +20,13 @@ public:
     [[nodiscard]] constexpr const T &get() const noexcept { return value_; }
 
 private:
-    T value_;
+    T value_{};
 };
 
 using valid_fd_t = strong_type<uint16_t, struct valid_fd>;
 using client_handle_t = strong_type<uint16_t, struct valid_fd>;
 
 // NOTE: client_handle_t must be able to index all clients.
-static_assert(SOUPBIN_MAX_CLIENTS <= std::numeric_limits<uint16_t>::max());
+static_assert(constants::bound::clients <= std::numeric_limits<uint16_t>::max());
 
-} // namespace soupbin
+} // namespace soupbin::detail

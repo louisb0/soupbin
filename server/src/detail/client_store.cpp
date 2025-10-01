@@ -1,21 +1,19 @@
-#include "client_store.hpp"
+#include "detail/client_store.hpp"
 
 #include "common/assert.hpp"
 #include "common/log.hpp"
 
-#include "session.hpp"
-#include "verify.hpp"
+#include "detail/verify.hpp"
 
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <ranges>
-#include <unordered_set>
 
 #include <sys/epoll.h>
 #include <unistd.h>
 
-namespace soupbin {
+namespace soupbin::detail {
 
 client_store::client_store(valid_fd_t epoll, client_handle_t max_clients) noexcept
     : epoll_(epoll), max_clients_(max_clients) {
@@ -33,49 +31,6 @@ client_store::~client_store() {
     }
 }
 
-client_store::ready_clients client_store::ready(int timeout_ms) noexcept {
-    DEBUG_ASSERT(verify::epoll(epoll_));
-    DEBUG_ASSERT(loop_info_.size() == activity_info_.size()); // SoA consistency.
-
-    const int nfds = epoll_wait(epoll_.get(), event_buffer_.data(), static_cast<int>(event_buffer_.size()), timeout_ms);
-    if (nfds == -1) {
-        if (errno == EINTR) {
-            return {};
-        }
-
-        LOG_CRITICAL("epoll_wait() failed unexpectedly: {}", std::strerror(errno));
-        ASSERT_UNREACHABLE();
-    }
-
-    const auto nready = static_cast<size_t>(nfds);
-    DEBUG_ASSERT(nready <= loop_info_.size());
-
-    // NOLINTBEGIN(*-array-index)
-    for (size_t i = 0; i < nready; i++) {
-        const cl_epoll_data data{ .u32 = event_buffer_[i].data.u32 };
-        const auto handle = data.parts.handle;
-
-        DEBUG_ASSERT(handle < loop_info_.size());
-        DEBUG_ASSERT(loop_info_[handle].handle.get() == handle);
-        DEBUG_ASSERT(loop_info_[handle].fd.get() == data.parts.fd);
-
-        ready_buffer_[i] = std::addressof(loop_info_[handle]);
-    }
-    // NOLINTEND(*-array-index)
-
-    // NOTE: We group by session so that clients on the same session are processed contiguously,
-    // keeping both our session data and the user's session-associated structures hot in cache.
-    auto ready = std::span{ ready_buffer_.data(), nready };
-    std::ranges::sort(ready, [](const auto *a, const auto *b) { return a->sess > b->sess; });
-
-    size_t auth_end = 0;
-    while (auth_end < ready.size() && ready[auth_end]->authed()) {
-        auth_end++;
-    }
-
-    return { .authed = ready.subspan(0, auth_end), .unauthed = ready.subspan(auth_end) };
-}
-
 void client_store::add(std::span<const valid_fd_t> fds) noexcept {
     DEBUG_ASSERT(verify::epoll(epoll_));
     DEBUG_ASSERT(loop_info_.size() == activity_info_.size());              // SoA consistency.
@@ -86,9 +41,9 @@ void client_store::add(std::span<const valid_fd_t> fds) noexcept {
     const auto now = std::chrono::steady_clock::now();
 
     for (const auto &fd : fds) {
-        auto it = std::ranges::find_if(loop_info_, [fd](const auto &li) { return li.fd.get() == fd.get(); });
         DEBUG_ASSERT(verify::fd(fd));
-        DEBUG_ASSERT(it == loop_info_.end());
+        DEBUG_ASSERT(std::ranges::find_if(loop_info_, [fd](const auto &li) { return li.fd.get() == fd.get(); }) ==
+                     loop_info_.end());
 
         const auto ch = client_handle_t(loop_info_.size());
 
@@ -103,9 +58,9 @@ void client_store::add(std::span<const valid_fd_t> fds) noexcept {
 
         // Add to epoll.
         epoll_event ev{ .events = EPOLLIN, .data = {
-                .u32 = cl_epoll_data{
+                .u64 = cl_epoll_data{
                     .parts = { .fd = fd.get(), .handle = ch.get() },
-                }.u32,
+                }.u64,
             },
         };
 
@@ -149,9 +104,9 @@ void client_store::remove(std::span<client_handle_t> chs) noexcept {
             loop_info_[ch.get()].handle = ch;
 
             epoll_event ev{ .events = EPOLLIN, .data = {
-                    .u32 = cl_epoll_data{
+                    .u64 = cl_epoll_data{
                         .parts = { .fd = loop_info_[ch.get()].fd.get(), .handle = ch.get() },
-                    }.u32,
+                    }.u64,
                 },
             };
 
@@ -188,9 +143,52 @@ void client_store::remove(std::span<client_handle_t> chs) noexcept {
     DEBUG_ASSERT(loop_info_.size() == activity_info_.size()); // SoA consistency.
 }
 
+client_store::ready_clients client_store::ready(int timeout_ms) noexcept {
+    DEBUG_ASSERT(verify::epoll(epoll_));
+    DEBUG_ASSERT(loop_info_.size() == activity_info_.size()); // SoA consistency.
+
+    const int nfds = epoll_wait(epoll_.get(), event_buffer_.data(), static_cast<int>(event_buffer_.size()), timeout_ms);
+    if (nfds == -1) {
+        if (errno == EINTR) {
+            return {};
+        }
+
+        LOG_CRITICAL("epoll_wait() failed unexpectedly: {}", std::strerror(errno));
+        ASSERT_UNREACHABLE();
+    }
+
+    const auto nready = static_cast<size_t>(nfds);
+    DEBUG_ASSERT(nready <= loop_info_.size());
+
+    // NOLINTBEGIN(*-array-index)
+    for (size_t i = 0; i < nready; i++) {
+        const cl_epoll_data data{ .u64 = event_buffer_[i].data.u64 };
+        const auto handle = data.parts.handle;
+
+        DEBUG_ASSERT(handle < loop_info_.size());
+        DEBUG_ASSERT(loop_info_[handle].handle.get() == handle);
+        DEBUG_ASSERT(loop_info_[handle].fd.get() == data.parts.fd);
+
+        ready_buffer_[i] = std::addressof(loop_info_[handle]);
+    }
+    // NOLINTEND(*-array-index)
+
+    // NOTE: We group by session so that clients on the same session are processed contiguously,
+    // keeping both our session data and the user's session-associated structures hot in cache.
+    auto ready = std::span{ ready_buffer_.data(), nready };
+    std::ranges::sort(ready, [](const auto *a, const auto *b) { return a->sess > b->sess; });
+
+    size_t auth_end = 0;
+    while (auth_end < ready.size() && ready[auth_end]->authed()) {
+        auth_end++;
+    }
+
+    return { .authed = ready.subspan(0, auth_end), .unauthed = ready.subspan(auth_end) };
+}
+
 std::span<const cl_activity_info> client_store::activity() const noexcept { return activity_info_; }
 
-cl_activity_info &client_store::activity_info(client_handle_t ch) noexcept {
+cl_activity_info &client_store::activity(client_handle_t ch) noexcept {
     DEBUG_ASSERT(loop_info_.size() == activity_info_.size());
     DEBUG_ASSERT(ch.get() < activity_info_.size());
     DEBUG_ASSERT(ch.get() == loop_info_[ch.get()].handle.get());
@@ -225,4 +223,4 @@ void client_store::assert_consistency() const noexcept {
     }
 }
 
-} // namespace soupbin
+} // namespace soupbin::detail
