@@ -9,7 +9,7 @@
 
 namespace soupbin {
 
-// ----------- server errors -----------
+// ------------------ server -----------------
 
 // NOLINTNEXTLINE(readability-enum-initial-value)
 enum class errc : uint8_t {
@@ -51,7 +51,7 @@ inline const std::error_category &soupbin_category() noexcept {
 
 inline std::error_code make_soupbin_error(errc e) noexcept { return { static_cast<int>(e), soupbin_category() }; }
 
-// ----------- getaddrinfo errors -----------
+// --------------- getaddrinfo ---------------
 
 struct gai_category_t final : std::error_category {
     [[nodiscard]] const char *name() const noexcept override { return "getaddrinfo"; }

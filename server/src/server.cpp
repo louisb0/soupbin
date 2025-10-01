@@ -37,7 +37,7 @@ using namespace soupbin::detail;
 
 namespace soupbin {
 
-// ---------------- declaration ----------------
+// --------------- declaration ---------------
 
 class server::impl {
     valid_fd_t listener_;
@@ -75,7 +75,7 @@ server::~server() noexcept = default;
 
 std::error_code server::run() noexcept { return impl_->run(); }
 
-// ---------------- definition ----------------
+// ---------------- definition ---------------
 
 std::error_code server::impl::run() noexcept {
     while (true) {
@@ -222,6 +222,12 @@ std::error_code server::impl::batch_authed(std::span<cl_loop_info *> authed, dro
                 break;
             }
 
+            case mt_logout_request: {
+                LOG_DEBUG("client={} requested logout, dropping.", client->handle.get());
+                to_drop[client->handle.get()] = true;
+                break;
+            }
+
             // NOTE: last_recv is set whenever data is received from a client.
             case detail::mt_client_heartbeat:
                 break;
@@ -231,21 +237,23 @@ std::error_code server::impl::batch_authed(std::span<cl_loop_info *> authed, dro
             case detail::mt_sequenced:
             case detail::mt_server_heartbeat:
             case detail::mt_end_of_session:
-            case detail::mt_login_request:
+            case detail::mt_login_request: {
                 LOG_WARN("client={} sent unexpected message_type={}, dropping.", client->fd.get(),
                          static_cast<char>(header->type));
                 to_drop[client->handle.get()] = true;
 
                 FUZZ_UNREACHABLE();
                 break;
+            }
 
-            default:
+            default: {
                 LOG_WARN("client={} sent unknown message_type={}, dropping.", client->fd.get(),
                          static_cast<char>(header->type));
                 to_drop[client->handle.get()] = true;
 
                 FUZZ_UNREACHABLE();
                 break;
+            }
             }
 
             DEBUG_ASSERT(bytes_parsed + total_msg_size <= bytes_read);
@@ -355,6 +363,7 @@ std::error_code server::impl::batch_authed(std::span<cl_loop_info *> authed, dro
 
 std::error_code server::impl::batch_unauthed(std::span<cl_loop_info *> unauthed, drop_list &to_drop) noexcept {
     DEBUG_ASSERT(std::ranges::all_of(unauthed, [](auto *li) { return !li->authed(); }));
+
     if (unauthed.empty()) {
         return {};
     }
@@ -362,7 +371,7 @@ std::error_code server::impl::batch_unauthed(std::span<cl_loop_info *> unauthed,
     return {};
 }
 
-// ----------------- factory ------------------
+// ----------------- factory -----------------
 
 std::expected<server, std::error_code> make_server(server_config cfg) {
     if (cfg.hostname.empty()) {

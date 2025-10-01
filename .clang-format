@@ -24,22 +24,27 @@ IncludeCategories:
     SortPriority: 2
     CaseSensitive: true
 
-  - Regex: '^"'
+  - Regex: '^"detail/'
     Priority: 3
     SortPriority: 3
     CaseSensitive: true
 
-  - Regex: '^<[^.]*>$'
+  - Regex: '^"'
     Priority: 4
     SortPriority: 4
     CaseSensitive: true
 
-  - Regex: '^<.*\.h>$'
+  - Regex: '^<[^.]*>$'
     Priority: 5
     SortPriority: 5
     CaseSensitive: true
 
-  - Regex: '.*'
+  - Regex: '^<.*\.h>$'
     Priority: 6
     SortPriority: 6
+    CaseSensitive: true
+
+  - Regex: '.*'
+    Priority: 7
+    SortPriority: 7
     CaseSensitive: true

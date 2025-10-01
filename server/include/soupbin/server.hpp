@@ -12,7 +12,7 @@
 
 namespace soupbin {
 
-// -------------- types --------------
+// ------------------ types ------------------
 
 enum class message_type : uint8_t {
     debug,
@@ -26,7 +26,7 @@ struct message_descriptor {
     message_type type;
 };
 
-// -------------- config --------------
+// ----------------- config ------------------
 
 using reply_handler = std::function<std::error_code(message_type type, std::span<const std::byte> payload)>;
 
@@ -45,7 +45,7 @@ struct server_config {
     tick_handler on_tick;
 };
 
-// -------------- server --------------
+// ----------------- server ------------------
 
 class server {
 public:
