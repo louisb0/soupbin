@@ -15,6 +15,7 @@ if(SOUPBIN_BUILD_TESTS)
         test/test_client_store.cpp
     )
     target_link_libraries(soupbinserver_tests PRIVATE
+        soupbin_common
         soupbinserver
         GTest::gtest
         GTest::gtest_main

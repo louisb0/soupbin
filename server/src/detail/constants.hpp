@@ -31,4 +31,9 @@ namespace bound {
     inline constexpr uint16_t max_data_msg = batch::size * batch::client_data_msg;
 } // namespace bound
 
+// TODO: ???
+static_assert(bound::max_recv == 128 * constants::cache_line_sz);                    // NOLINT
+static_assert(bound::max_data_msg == 32 * constants::cache_line_sz);                 // NOLINT
+static_assert(constants::batch::client_data_send == 262 * constants::cache_line_sz); // NOLINT
+
 } // namespace soupbin::detail::constants

@@ -16,11 +16,13 @@
 #include <array>
 #include <bitset>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <span>
+#include <string>
 #include <system_error>
 #include <type_traits>
 #include <utility>
@@ -44,6 +46,8 @@ class server::impl {
     client_store cstore_;
     server_config cfg_;
 
+    std::unordered_map<uint64_t, session> sessions_;
+
 public:
     impl(valid_fd_t listener, valid_fd_t epoll, server_config &&cfg)
         : listener_(listener), cstore_(epoll, client_handle_t{ constants::bound::clients }), cfg_(std::move(cfg)) {
@@ -63,9 +67,12 @@ private:
     using drop_list = std::bitset<constants::bound::clients>;
     using sent_list = std::bitset<constants::bound::clients>;
 
-    [[nodiscard]] std::error_code batch_authed(std::span<cl_loop_info *> authed, drop_list &to_drop,
-                                               sent_list &did_send) const noexcept;
-    [[nodiscard]] std::error_code batch_unauthed(std::span<cl_loop_info *> unauthed, drop_list &to_drop) noexcept;
+    void batch_authed(std::span<cl_loop_info *> authed, drop_list &to_drop, sent_list &did_send) const noexcept;
+    void batch_unauthed(std::span<cl_loop_info *> unauthed, drop_list &to_drop) noexcept;
+
+    // TODO: Location.
+    static bool send_all(const cl_loop_info *client, const std::byte *buf, size_t len) noexcept;
+    static bool recv_all(const cl_loop_info *client, std::byte *buf, size_t len, size_t &read) noexcept;
 };
 
 server::server(std::unique_ptr<impl> pimpl) noexcept : impl_(std::move(pimpl)) {}
@@ -79,22 +86,21 @@ std::error_code server::run() noexcept { return impl_->run(); }
 
 std::error_code server::impl::run() noexcept {
     while (true) {
-        auto [authed, unauthed] = cstore_.ready(cfg_.tick_ms);
-
         drop_list to_drop;
         sent_list did_send;
 
-        if (auto err = batch_authed(authed, to_drop, did_send); err) {
-            break;
-        }
-        cstore_.assert_consistency();
+        std::span<cl_loop_info *> all;
+        {
+            auto [authed, unauthed] = cstore_.ready(cfg_.tick_ms);
 
-        if (auto err = batch_unauthed(authed, to_drop); err) {
-            break;
-        }
-        cstore_.assert_consistency();
+            batch_authed(authed, to_drop, did_send);
+            batch_unauthed(authed, to_drop);
 
-        // TODO: Session catchup.
+            DEBUG_ASSERT(authed.data() + authed.size() == unauthed.data());
+            all = std::span{ authed.data(), authed.size() + unauthed.size() };
+        }
+
+        // TODO: Send all queued sequenced data - what about dropped clients?
         // TODO: Set activity.
         // TODO: Heartbeats.
         // TODO: Drop clients.
@@ -104,271 +110,369 @@ std::error_code server::impl::run() noexcept {
     return {};
 }
 
-std::error_code server::impl::batch_authed(std::span<cl_loop_info *> authed, drop_list &to_drop,
-                                           sent_list &did_send) const noexcept {
-    DEBUG_ASSERT(std::ranges::all_of(authed, [](auto *li) { return li->authed(); }));
-    DEBUG_ASSERT(authed.size() <= constants::batch::size);
-
+void server::impl::batch_authed(std::span<cl_loop_info *> authed, drop_list &to_drop, sent_list &did_send) const noexcept {
     if (authed.empty()) {
-        return {};
+        return;
     }
 
-    // --------------------------------
-    // (1) Build descriptors.
-    // --------------------------------
-    alignas(constants::cache_line_sz) std::array<std::byte, constants::bound::max_recv> recv_buffer{};
-    alignas(constants::cache_line_sz) std::array<message_descriptor, constants::bound::max_data_msg> msg_descriptors{};
-    alignas(constants::cache_line_sz) std::array<uint8_t, constants::batch::size> client_msg_counts{};
+    DEBUG_ASSERT(authed.size() <= constants::batch::size);
+    DEBUG_ASSERT(std::ranges::all_of(authed, [](const auto *client) { return client->authed(); }));
 
-    static_assert(recv_buffer.size() == 128 * constants::cache_line_sz);    // NOLINT
-    static_assert(msg_descriptors.size() == 32 * constants::cache_line_sz); // NOLINT
-    static_assert(client_msg_counts.size() <= constants::cache_line_sz);
-    static_assert(std::numeric_limits<decltype(client_msg_counts)::value_type>::max() >= constants::batch::client_data_msg);
+    alignas(constants::cache_line_sz) std::array<std::byte, constants::bound::max_recv> recv_buf{};
+    alignas(constants::cache_line_sz) std::array<message_descriptor, constants::bound::max_data_msg> descriptors{};
+    alignas(constants::cache_line_sz) std::array<uint8_t, constants::batch::size> client_descriptor_counts{};
+    static_assert(std::numeric_limits<decltype(client_descriptor_counts)::value_type>::max() >=
+                  constants::batch::client_data_msg);
 
-    size_t recv_buffer_offset = 0;
-    size_t total_msg_count = 0;
+    // ----------------------------------------
+    // (1) Receive data, build descriptors.
+    // ----------------------------------------
+    size_t recv_buf_offset = 0;
+    size_t total_descriptor_count = 0;
 
     for (size_t i = 0; i < authed.size(); i++) {
         auto *client = authed[i];
-        auto *client_buffer = recv_buffer.data() + recv_buffer_offset;
+        auto *client_buf = recv_buf.data() + recv_buf_offset;
 
-        // Load partial.
-        std::memcpy(client_buffer, client->partial.buf.data(), client->partial.len);
-        size_t bytes_read = client->partial.len;
+        // 1.1 Receive.
+        size_t read = client->partial.load(client_buf);
+        bool success = recv_all(client, client_buf, constants::batch::client_recv, read);
+        if (!success) {
+            to_drop[client->handle.get()] = true;
 
-        // Receive data.
-        while (bytes_read != constants::batch::client_recv) {
-            const ssize_t received =
-                recv(client->fd.get(), client_buffer + bytes_read, constants::batch::client_recv - bytes_read, MSG_DONTWAIT);
-
-            if (received == -1) {
-                if (errno == EINTR) {
-                    continue;
-                }
-
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    break;
-                }
-
-                if (errno == ECONNRESET) {
-                    LOG_DEBUG("client={} disconnected abruptly, dropping.", client->handle.get());
-                    to_drop[client->handle.get()] = true;
-                    break;
-                }
-
-                if (errno == ENOMEM || errno == ENOBUFS) {
-                    PANIC("recv() failed due to lack of system memory.");
-                    break;
-                }
-
-                LOG_CRITICAL("recv() failed unexpectedly: {}", std::strerror(errno));
-                ASSERT_UNREACHABLE();
+            if (read == 0) {
+                continue;
             }
-
-            if (received == 0) {
-                LOG_DEBUG("client={} closed their connection, dropping.", client->handle.get());
-                to_drop[client->handle.get()] = true;
-                break;
-            }
-
-            DEBUG_ASSERT(received > 0);
-            DEBUG_ASSERT(bytes_read + received <= constants::batch::client_recv);
-            bytes_read += received;
         }
 
-        // Build descriptors.
-        size_t bytes_parsed = 0;
-        while (bytes_parsed != bytes_read) {
-            const size_t bytes_available = bytes_read - bytes_parsed;
-
-            if (bytes_available < sizeof(detail::msg_header)) {
+        // 1.2 Build message descriptors.
+        size_t parsed = 0;
+        while (parsed != read) {
+            const size_t available = read - parsed;
+            if (available < sizeof(msg_header)) {
                 break;
             }
 
-            const auto *header = reinterpret_cast<const detail::msg_header *>(client_buffer + bytes_parsed);
-            const uint16_t payload_length = ntohs(header->length);
-            const size_t total_msg_size = sizeof(detail::msg_header) + payload_length;
-
-            if (bytes_available < total_msg_size) {
-                break;
-            }
-
-            if (payload_length > constants::max_payload_size) {
-                LOG_WARN("client={} payload too large at {} bytes, dropping.", client->fd.get(), payload_length);
+            const auto *header = reinterpret_cast<const msg_header *>(client_buf + parsed);
+            const size_t payload_len = ntohs(header->length);
+            if (payload_len > constants::max_payload_size) {
+                LOG_WARN("client={} payload too large at {} bytes.", client->fd.get(), payload_len);
                 to_drop[client->handle.get()] = true;
-
                 FUZZ_UNREACHABLE();
                 break;
             }
 
-            DEBUG_ASSERT(bytes_available >= total_msg_size);
-            DEBUG_ASSERT(payload_length <= constants::max_payload_size);
+            const size_t message_len = sizeof(msg_header) + payload_len;
+            if (available < message_len) {
+                break;
+            }
 
             switch (header->type) {
-            case detail::mt_debug:
-            case detail::mt_unsequenced: {
-                // NOTE: ASSERT(payload_length <= constants::max_payload_size) ensures static_cast<uint8_t> is valid.
+            case mt_debug:
+            case mt_unsequenced: {
+                DEBUG_ASSERT(payload_len <= constants ::max_payload_size);
                 static_assert(std::is_same_v<decltype(constants::max_payload_size), const uint8_t>);
 
-                msg_descriptors[total_msg_count++] = {
-                    .offset = reinterpret_cast<const std::byte *>(header) + sizeof(detail::msg_header),
-                    .len = static_cast<uint8_t>(payload_length),
-                    .type = (header->type == detail::mt_debug) ? message_type::debug : message_type::unsequenced,
+                descriptors[total_descriptor_count++] = {
+                    .offset = reinterpret_cast<const std::byte *>(header) + sizeof(msg_header),
+                    .len = static_cast<uint8_t>(payload_len),
+                    .type = (header->type == mt_debug) ? message_type::debug : message_type::unsequenced,
                 };
-                client_msg_counts[i]++;
+                client_descriptor_counts[i]++;
 
-                DEBUG_ASSERT(total_msg_count <= msg_descriptors.size());
-                DEBUG_ASSERT(client_msg_counts[i] <= constants::batch::client_data_msg);
+                DEBUG_ASSERT(total_descriptor_count <= descriptors.size());
+                DEBUG_ASSERT(client_descriptor_counts[i] <= constants::batch::client_data_msg);
                 break;
             }
 
             case mt_logout_request: {
-                LOG_DEBUG("client={} requested logout, dropping.", client->handle.get());
+                LOG_DEBUG("client={} requested logout.", client->handle.get());
                 to_drop[client->handle.get()] = true;
                 break;
             }
 
-            // NOTE: last_recv is set whenever data is received from a client.
-            case detail::mt_client_heartbeat:
+            case mt_client_heartbeat: {
                 break;
+            }
 
-            case detail::mt_login_accepted:
-            case detail::mt_login_rejected:
-            case detail::mt_sequenced:
-            case detail::mt_server_heartbeat:
-            case detail::mt_end_of_session:
-            case detail::mt_login_request: {
-                LOG_WARN("client={} sent unexpected message_type={}, dropping.", client->fd.get(),
-                         static_cast<char>(header->type));
+            case mt_login_accepted:
+            case mt_login_rejected:
+            case mt_sequenced:
+            case mt_server_heartbeat:
+            case mt_end_of_session:
+            case mt_login_request: {
+                LOG_WARN("client={} sent unexpected mt={}.", client->handle.get(), static_cast<char>(header->type));
                 to_drop[client->handle.get()] = true;
-
                 FUZZ_UNREACHABLE();
                 break;
             }
 
             default: {
-                LOG_WARN("client={} sent unknown message_type={}, dropping.", client->fd.get(),
-                         static_cast<char>(header->type));
+                LOG_WARN("client={} sent unknown mt={}.", client->handle.get(), static_cast<char>(header->type));
                 to_drop[client->handle.get()] = true;
-
                 FUZZ_UNREACHABLE();
                 break;
             }
             }
 
-            DEBUG_ASSERT(bytes_parsed + total_msg_size <= bytes_read);
-            bytes_parsed += total_msg_size;
+            DEBUG_ASSERT(parsed + message_len <= read);
+            parsed += message_len;
         }
 
-        // Write-back partial.
-        const size_t bytes_remaining = bytes_read - bytes_parsed;
-        DEBUG_ASSERT(bytes_remaining < client->partial.buf.size());
+        // 1.3 Advance.
+        client->partial.store(client_buf + parsed, read - parsed);
 
-        std::memcpy(client->partial.buf.data(), client_buffer + bytes_parsed, bytes_remaining);
-        client->partial.len = bytes_remaining;
-
-        // Update position.
-        DEBUG_ASSERT(recv_buffer_offset + bytes_parsed <= recv_buffer.size());
-        recv_buffer_offset += bytes_parsed;
+        DEBUG_ASSERT(recv_buf_offset + parsed <= recv_buf.size());
+        recv_buf_offset += parsed;
     }
 
-    // --------------------------------
-    // (2) Run callbacks.
-    // --------------------------------
+    // ----------------------------------------
+    // (2) Return descriptors to user-layer.
+    // ----------------------------------------
     size_t descriptor_offset = 0;
 
     for (size_t i = 0; i < authed.size(); i++) {
         const auto *client = authed[i];
-        const auto msg_count = client_msg_counts[i];
-        DEBUG_ASSERT(msg_count <= constants::batch::client_data_msg);
+        const auto client_descriptor_count = client_descriptor_counts[i];
 
-        if (msg_count == 0) {
+        // 2.1 Fetch and validate client descriptors.
+        if (client_descriptor_count == 0) {
             continue;
         }
+        DEBUG_ASSERT(client_descriptor_count <= constants::batch::client_data_msg);
 
-        const std::span<message_descriptor> client_msgs = { &msg_descriptors[descriptor_offset], msg_count };
-        for (const auto &msg : client_msgs) {
+        const std::span<message_descriptor> client_descriptors = {
+            &descriptors[descriptor_offset],
+            client_descriptor_count,
+        };
+        for (const auto &msg : client_descriptors) {
             DEBUG_ASSERT(msg.type == message_type::debug || msg.type == message_type::unsequenced);
             DEBUG_ASSERT(msg.len <= constants::max_payload_size);
         }
 
-        // NOTE: It is extremely unlikely this buffer fills. It is a tight upper bound used to avoid dynamic allocation.
-        alignas(constants::cache_line_sz) std::array<std::byte, constants::batch::client_data_send> reply_buffer{};
-        static_assert(reply_buffer.size() == 262 * constants::cache_line_sz); // NOLINT
-
-        // 1. Run callbacks, queue responses.
-        size_t reply_size = 0;
+        // 2.2 Run callback and buffer responses.
+        alignas(constants::cache_line_sz) std::array<std::byte, constants::batch::client_data_send> reply_buf{};
+        size_t reply_buf_offset = 0;
 
         cfg_.on_client_msgs(
-            std::string_view(client->sess->id()), client_msgs,
-            [&reply_buffer, &reply_size, &did_send, client](message_type type, std::span<const std::byte> payload) {
+            std::string_view(client->sess->id()), client_descriptors,
+            [&reply_buf, &reply_buf_offset, &did_send, client](message_type type, std::span<const std::byte> payload) {
+                if (payload.empty()) {
+                    return make_soupbin_error(errc::reply_too_small);
+                }
                 if (payload.size() > constants::max_payload_size) {
                     return make_soupbin_error(errc::reply_too_large);
                 }
 
-                did_send[client->handle.get()] = true;
-
                 if (type == message_type::sequenced) {
                     client->sess->append_sequenced_msg(payload);
-                    return std::error_code{};
+                } else {
+                    DEBUG_ASSERT(type == message_type::debug || type == message_type::unsequenced);
+                    DEBUG_ASSERT(reply_buf_offset + sizeof(msg_header) + payload.size() <= reply_buf.size());
+
+                    auto *header = reinterpret_cast<msg_header *>(reply_buf.data() + reply_buf_offset);
+                    header->length = htons(static_cast<uint16_t>(payload.size()));
+                    header->type = (type == message_type::debug) ? mt_debug : mt_unsequenced;
+                    std::memcpy(reply_buf.data() + reply_buf_offset + sizeof(msg_header), payload.data(), payload.size());
+
+                    reply_buf_offset += sizeof(msg_header) + payload.size();
                 }
 
-                DEBUG_ASSERT(type == message_type::debug || type == message_type::unsequenced);
-                DEBUG_ASSERT(reply_size + sizeof(detail::msg_header) + payload.size() <= reply_buffer.size());
-
-                auto *header = reinterpret_cast<detail::msg_header *>(reply_buffer.data() + reply_size);
-                header->length = htons(static_cast<uint16_t>(payload.size()));
-                header->type = (type == message_type::debug) ? detail::mt_debug : detail::mt_unsequenced;
-                std::memcpy(reply_buffer.data() + reply_size + sizeof(detail::msg_header), payload.data(), payload.size());
-
-                reply_size += sizeof(detail::msg_header) + payload.size();
+                did_send[client->handle.get()] = true;
                 return std::error_code{};
             });
 
-        DEBUG_ASSERT(reply_size == 0 || reply_size > sizeof(detail::msg_header));
+        // TODO: Assert validity of reply buffer?
+        // TODO: Assert validity of session buffer?
 
-        // 2. Send all data which is not sequenced.
-        size_t bytes_sent = 0;
-        while (bytes_sent != reply_size) {
-            ssize_t sent = send(client->fd.get(), reply_buffer.data() + bytes_sent, reply_size - bytes_sent, MSG_NOSIGNAL);
-            if (sent == -1) {
-                if (errno == EINTR) {
-                    continue;
-                }
-
-                if (errno == ECONNRESET || errno == EPIPE) {
-                    LOG_DEBUG("client={} connection broken, dropping.", client->handle.get());
-                    to_drop[client->handle.get()] = true;
-                    break;
-                }
-
-                if (errno == ENOMEM || errno == ENOBUFS) {
-                    PANIC("send() failed due to lack of system memory.");
-                    break;
-                }
-
-                LOG_CRITICAL("send() failed unexpectedly: {}", std::strerror(errno));
-                ASSERT_UNREACHABLE();
-            }
-
-            bytes_sent += sent;
+        // 2.3 Send buffered non-sequenced data.
+        bool success = send_all(client, reply_buf.data(), reply_buf_offset);
+        if (!success) {
+            to_drop[client->handle.get()] = true;
         }
 
-        descriptor_offset += msg_count;
+        descriptor_offset += client_descriptor_count;
     }
-    DEBUG_ASSERT(descriptor_offset == total_msg_count);
+    DEBUG_ASSERT(descriptor_offset == total_descriptor_count);
 
-    return {};
+    LOG_INFO("total_descriptor_count={} data messages were forwarded to the user-layer.", total_descriptor_count);
 }
 
-std::error_code server::impl::batch_unauthed(std::span<cl_loop_info *> unauthed, drop_list &to_drop) noexcept {
-    DEBUG_ASSERT(std::ranges::all_of(unauthed, [](auto *li) { return !li->authed(); }));
-
+void server::impl::batch_unauthed(std::span<cl_loop_info *> unauthed, drop_list &to_drop) noexcept {
     if (unauthed.empty()) {
-        return {};
+        return;
     }
 
-    return {};
+    DEBUG_ASSERT(unauthed.size() <= constants::batch::size);
+    DEBUG_ASSERT(std::ranges::all_of(unauthed, [](const auto *client) { return !client->authed(); }));
+    DEBUG_ASSERT(std::ranges::all_of(unauthed, [&to_drop](const auto *client) { return !to_drop[client->handle.get()]; }));
+
+    for (auto *client : unauthed) {
+        std::array<std::byte, sizeof(msg_login_request)> login_req_buf{};
+
+        // ----------------------------------------
+        // (1) Receive login message.
+        // ----------------------------------------
+        size_t read = client->partial.load(login_req_buf.data());
+        bool success = recv_all(client, login_req_buf.data(), login_req_buf.size(), read);
+        if (!success) {
+            to_drop[client->handle.get()] = true;
+            continue;
+        }
+
+        if (read != login_req_buf.size()) {
+            client->partial.store(login_req_buf.data(), read);
+            continue;
+        }
+
+        // ----------------------------------------
+        // (2) Validate message structure.
+        // ----------------------------------------
+        const auto *request = reinterpret_cast<const msg_login_request *>(login_req_buf.data());
+
+        if (request->hdr.type != mt_login_request) {
+            LOG_WARN("client={} did not send a login request.", client->handle.get());
+            to_drop[client->handle.get()] = true;
+            FUZZ_UNREACHABLE();
+            continue;
+        }
+
+        if (request->hdr.length != sizeof(msg_login_request) - sizeof(msg_header)) {
+            LOG_WARN("client={} sent a login request with bad length.", client->handle.get());
+            to_drop[client->handle.get()] = true;
+            FUZZ_UNREACHABLE();
+            continue;
+        }
+
+        const std::string_view username = view_right_padded(request->username, username_len);
+        const std::string_view password = view_right_padded(request->password, password_len);
+        const std::string_view req_session_id = view_left_padded(request->session_id, session_id_len);
+        const std::string_view sequence_num = view_left_padded(request->sequence_num, sequence_num_len);
+
+        LOG_INFO("client={} requesting login with username='{}' password='{}' session_id='{}' sequence_num={}",
+                 client->handle.get(), username, password, req_session_id, sequence_num);
+
+        // ----------------------------------------
+        // (3) Validate credentials.
+        // ----------------------------------------
+        if (!cfg_.on_auth(username, password)) {
+            LOG_INFO("client={} failed authentication callback.", client->handle.get());
+
+            const auto reject = msg_login_rejected::build(rej_not_authenticated);
+            const auto *reject_buf = reinterpret_cast<const std::byte *>(&reject);
+            send_all(client, reject_buf, sizeof(reject));
+
+            to_drop[client->handle.get()] = true;
+            continue;
+        }
+
+        // ----------------------------------------
+        // (4) Validate or create session.
+        // ----------------------------------------
+        const std::string session_id = !req_session_id.empty() ? std::string(req_session_id) : generate_session_id();
+
+        auto [it, inserted] = sessions_.try_emplace(std::stoull(session_id), session_id, std::string(username));
+        auto &session = it->second;
+
+        if (!inserted) {
+            bool owns_session = username == session.owner();
+            bool valid_seqnum = std::stoul(std::string(sequence_num)) <= session.sequence_num();
+
+            if (!owns_session || !valid_seqnum) {
+                LOG_INFO("client={} failed session subscription check.", client->handle.get());
+
+                const auto reject = msg_login_rejected::build(rej_no_session);
+                const auto *reject_buf = reinterpret_cast<const std::byte *>(&reject);
+                send_all(client, reject_buf, sizeof(reject));
+
+                to_drop[client->handle.get()] = true;
+                continue;
+            }
+        }
+
+        // ----------------------------------------
+        // (5) Send login accepted, subscribe to session.
+        // ----------------------------------------
+        const auto accept = msg_login_accepted::build(session_id, sequence_num);
+        const auto *accept_buf = reinterpret_cast<const std::byte *>(&accept);
+        send_all(client, accept_buf, sizeof(accept));
+
+        session.subscribe(client, std::stoul(std::string(sequence_num)));
+
+        LOG_INFO("client={} authenticated and subscribed to session_id={}.", client->handle.get(), session_id);
+    }
+}
+
+bool server::impl::send_all(const cl_loop_info *client, const std::byte *buf, size_t len) noexcept {
+    size_t sent = 0;
+    while (sent != len) {
+        const ssize_t n = send(client->fd.get(), buf + sent, len - sent, MSG_NOSIGNAL);
+
+        if (n == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+
+            if (errno == ECONNRESET || errno == EPIPE) {
+                LOG_DEBUG("client={} disconnected abruptly.", client->handle.get());
+                return false;
+            }
+
+            if (errno == ENOMEM || errno == ENOBUFS) {
+                PANIC("send() failed due to lack of system memory.");
+                return false;
+            }
+
+            LOG_CRITICAL("send() failed unexpectedly: {}", std::strerror(errno));
+            ASSERT_UNREACHABLE();
+            return false;
+        }
+
+        DEBUG_ASSERT(n > 0);
+        sent += n;
+    }
+
+    return true;
+}
+
+bool server::impl::recv_all(const cl_loop_info *client, std::byte *buf, size_t len, size_t &read) noexcept {
+    while (read < len) {
+        const ssize_t n = recv(client->fd.get(), buf + read, len - read, MSG_DONTWAIT);
+
+        if (n == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                return true;
+            }
+
+            if (errno == ECONNRESET) {
+                LOG_DEBUG("client={} disconnected abruptly.", client->handle.get());
+                return false;
+            }
+
+            if (errno == ENOMEM || errno == ENOBUFS) {
+                PANIC("recv() failed due to lack of system memory.");
+                return false;
+            }
+
+            LOG_CRITICAL("recv() failed unexpectedly: {}", std::strerror(errno));
+            ASSERT_UNREACHABLE();
+            return false;
+        }
+
+        if (n == 0) {
+            LOG_DEBUG("client={} closed their connection.", client->handle.get());
+            return false;
+        }
+
+        DEBUG_ASSERT(n > 0);
+        read += n;
+    }
+
+    return true;
 }
 
 // ----------------- factory -----------------

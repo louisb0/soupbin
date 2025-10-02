@@ -16,10 +16,11 @@ enum class errc : uint8_t {
     setup_hostname_format = 1,
     setup_port_format,
     setup_not_listenable,
+    reply_too_small,
     reply_too_large,
 
     first_ = setup_hostname_format,
-    last_ = setup_port_format,
+    last_ = reply_too_large,
 };
 
 struct soupbin_category_t final : std::error_category {
@@ -36,8 +37,10 @@ struct soupbin_category_t final : std::error_category {
             return "port was empty";
         case errc::setup_not_listenable:
             return "no resolved address for the given host and port wsa listenable";
+        case errc::reply_too_small:
+            return "reply payload is empty";
         case errc::reply_too_large:
-            return "reply payload exceeded upper bound: each reply should contain only one higher level message.";
+            return "reply payload exceeded upper bound";
         default:
             return "unknown";
         }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "detail/constants.hpp"
+#include "detail/partial.hpp"
 #include "detail/types.hpp"
 #include "detail/verify.hpp"
 
@@ -26,11 +27,7 @@ struct cl_loop_info {
     detail::session *sess{};
     detail::valid_fd_t fd{ 0 };
     detail::client_handle_t handle{ 0 };
-
-    struct {
-        uint8_t len;
-        std::array<std::byte, constants::max_msg_sz> buf;
-    } partial{};
+    detail::partial partial{};
 
     [[nodiscard]] bool authed() const noexcept { return sess != nullptr; }
 };

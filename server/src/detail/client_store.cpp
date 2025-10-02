@@ -52,7 +52,6 @@ void client_store::add(std::span<const valid_fd_t> fds) noexcept {
             .sess = nullptr,
             .fd = fd,
             .handle = ch,
-            .partial = { .len = 0, .buf = {} },
         });
         activity_info_.push_back(cl_activity_info{ .last_send = {}, .last_recv = now });
 
@@ -213,11 +212,12 @@ void client_store::assert_consistency() const noexcept {
 
     // Invariant(4): client field stability.
     for (size_t i = 0; i < loop_info_.size(); i++) {
-        const auto &li = loop_info_[i];
+        const auto &client = loop_info_[i];
 
-        DEBUG_ASSERT(verify::fd(li.fd));
-        DEBUG_ASSERT(li.handle.get() == i);
-        DEBUG_ASSERT(li.partial.len <= li.partial.buf.size());
+        DEBUG_ASSERT(verify::fd(client.fd));
+        DEBUG_ASSERT(client.handle.get() == i);
+
+        client.partial.assert_consistency();
 
         // TODO: Session assertions.
     }

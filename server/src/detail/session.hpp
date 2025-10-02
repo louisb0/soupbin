@@ -1,17 +1,46 @@
 #pragma once
 
+#include "detail/messages.hpp"
+
 #include <cstddef>
+#include <random>
 #include <span>
 #include <string>
 
 namespace soupbin::detail {
+struct cl_loop_info;
 
 // TODO
 class session {
 public:
+    session(std::string id, std::string owner);
+
+    void subscribe(const cl_loop_info *client, size_t sequence_num);
+
+    [[nodiscard]] const std::string &owner() const noexcept;
+    [[nodiscard]] size_t sequence_num() const noexcept;
+
     [[nodiscard]] const std::string &id() const noexcept;
     void append_sequenced_msg(std::span<const std::byte>);
 };
+
+// NOLINTBEGIN
+inline std::string generate_session_id() {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<> dis(0, 15);
+
+    std::string result;
+    result.reserve(detail::session_id_len);
+
+    for (size_t i = 0; i < detail::session_id_len; ++i) {
+        int val = dis(gen);
+        result += (val < 10) ? ('0' + val) : ('a' + val - 10);
+    }
+
+    return result;
+}
+// NOLINTEND
 
 // class client_store;
 // struct cl_loop_info;
