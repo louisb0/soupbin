@@ -1,61 +1,56 @@
 #pragma once
 
-#include "common/assert.hpp"
-
-#include "detail/constants.hpp"
+#include "detail/config.hpp"
 #include "detail/messages.hpp"
+
+#include "common/assert.hpp"
 
 #include <array>
 #include <cstddef>
+#include <cstring>
+#include <limits>
 
 namespace soupbin::detail {
 
-class partial {
-    uint8_t len_{};
-    std::array<std::byte, constants::max_msg_sz> buf_{};
+// TODO: Shared with client module - should be extracted alongside messages.
 
-    static_assert(constants::max_msg_sz <= std::numeric_limits<uint8_t>::max());
+template <size_t N>
+class partial {
+public:
+    using size_type = uint8_t;
+
+private:
+    static_assert(N <= std::numeric_limits<size_type>::max());
+
+    std::array<std::byte, N> buffer_{};
+    size_type length_{};
 
 public:
-    void store(std::byte *input, size_t len) noexcept {
+    void store(std::byte *input, size_type length) noexcept {
         DEBUG_ASSERT(input != nullptr);
-        DEBUG_ASSERT(len <= buf_.size());
-        DEBUG_ASSERT(len_ == 0);
+        DEBUG_ASSERT(length_ == 0);
+        DEBUG_ASSERT(length <= buffer_.size());
 
-        std::memcpy(buf_.data(), input, len);
-        len_ = len;
-    }
-
-    [[nodiscard]] size_t load(std::byte *output) noexcept {
-        DEBUG_ASSERT(output != nullptr);
-        DEBUG_ASSERT(len_ <= buf_.size());
-
-        size_t to_load = len_;
-        len_ = 0;
-        std::memcpy(output, buf_.data(), to_load);
-
-        return to_load;
-    }
-
-    void assert_consistency() const noexcept {
-        DEBUG_ASSERT(len_ <= buf_.size());
+        std::memcpy(buffer_.data(), input, length);
+        length_ = static_cast<uint8_t>(length);
 
 #ifndef NDEBUG
-        if (len_ > sizeof(detail::msg_header)) {
-            const auto *header = reinterpret_cast<const msg_header *>(buf_.data());
+        if (length_ > sizeof(detail::msg_header)) {
+            const auto *header = reinterpret_cast<const detail::msg_header *>(buffer_.data());
+
             switch (header->type) {
-            case mt_debug:
-            case mt_unsequenced:
-            case mt_logout_request:
-            case mt_login_request:
-            case mt_client_heartbeat:
+            case detail::mt_debug:
+            case detail::mt_unsequenced:
+            case detail::mt_logout_request:
+            case detail::mt_login_request:
+            case detail::mt_client_heartbeat:
                 break;
 
-            case mt_login_accepted:
-            case mt_login_rejected:
-            case mt_sequenced:
-            case mt_server_heartbeat:
-            case mt_end_of_session:
+            case detail::mt_login_accepted:
+            case detail::mt_login_rejected:
+            case detail::mt_sequenced:
+            case detail::mt_server_heartbeat:
+            case detail::mt_end_of_session:
                 FUZZ_UNREACHABLE();
                 break;
 
@@ -65,6 +60,16 @@ public:
             }
         }
 #endif
+    }
+
+    [[nodiscard]] size_type load(std::byte *output) noexcept {
+        DEBUG_ASSERT(output != nullptr);
+
+        std::memcpy(output, buffer_.data(), length_);
+        const size_type loaded = length_;
+        length_ = 0;
+
+        return loaded;
     }
 };
 
