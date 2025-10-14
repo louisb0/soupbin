@@ -6,9 +6,17 @@
 
 #include <netinet/in.h>
 
+// TODO:
+//  - Add parsing layer
+//  - Rework build interface
+//  - Add prebuilt static messages (e.g. heartbeats)
+//  - Rework and test formatting functions
+
 namespace soupbin::detail {
 
-// -------------- types --------------
+// ============================================================================
+// Types.
+// ============================================================================
 
 static constexpr uint8_t username_len = 6;
 static constexpr uint8_t password_len = 10;
@@ -16,29 +24,28 @@ static constexpr uint8_t session_id_len = 10;
 static constexpr uint8_t sequence_num_len = 20;
 
 enum message_type : uint8_t {
-    // server <-> client
     mt_debug = '+',
     mt_unsequenced = 'U',
 
-    // server -> client
+    mt_server_heartbeat = 'H',
     mt_login_accepted = 'A',
     mt_login_rejected = 'J',
     mt_sequenced = 'S',
-    mt_server_heartbeat = 'H',
     mt_end_of_session = 'Z',
 
-    // client -> server
+    mt_client_heartbeat = 'R',
     mt_login_request = 'L',
     mt_logout_request = 'O',
-    mt_client_heartbeat = 'R',
 };
 
-enum login_reject_code : uint8_t {
+enum reject_code : uint8_t {
     rej_not_authenticated = 'A',
     rej_no_session = 'S',
 };
 
-// -------------- messages --------------
+// ============================================================================
+// Messages.
+// ============================================================================
 // NOLINTBEGIN(*-c-arrays)
 
 struct __attribute__((packed)) msg_header {
@@ -56,14 +63,14 @@ struct __attribute__((packed)) msg_login_request {
 
 struct __attribute__((packed)) msg_login_rejected {
     msg_header hdr;
-    login_reject_code reason;
+    reject_code reason;
 
-    [[nodiscard]] static msg_login_rejected build(login_reject_code reason) {
+    [[nodiscard]] static msg_login_rejected build(reject_code reason) {
         DEBUG_ASSERT(reason == rej_not_authenticated || reason == rej_no_session);
 
         msg_login_rejected msg{};
         msg.hdr.length = htons(sizeof(msg) - sizeof(msg.hdr));
-        msg.hdr.type = detail::mt_login_rejected;
+        msg.hdr.type = mt_login_rejected;
         msg.reason = reason;
 
         return msg;
@@ -81,19 +88,33 @@ struct __attribute__((packed)) msg_login_accepted {
 
         msg_login_accepted msg{};
         msg.hdr.length = htons(sizeof(msg) - sizeof(msg.hdr));
-        msg.hdr.type = detail::mt_login_accepted;
-        std::memcpy(msg.session_id, session_id.data(), detail::session_id_len);
-        std::memcpy(msg.sequence_num, sequence_num.data(), detail::sequence_num_len);
+        msg.hdr.type = mt_login_accepted;
+        std::memcpy(msg.session_id, session_id.data(), session_id_len);
+        std::memcpy(msg.sequence_num, sequence_num.data(), sequence_num_len);
 
         return msg;
     }
 };
 
-// NOLINTEND(*-c-arrays)
-// ------------- formatting -------------
+struct __attribute__((packed)) msg_server_heartbeat {
+    msg_header hdr;
 
-// TODO: This may introduce needless overhead.
-// TODO: Test.
+    [[nodiscard]] static msg_server_heartbeat build() {
+        msg_server_heartbeat msg{};
+        msg.hdr.length = htons(sizeof(msg) - sizeof(msg.hdr));
+        msg.hdr.type = mt_server_heartbeat;
+
+        return msg;
+    }
+};
+
+constexpr size_t msg_minimum_size = sizeof(msg_header);
+
+// NOLINTEND(*-c-arrays)
+// ============================================================================
+// Formatting.
+// ============================================================================
+
 [[nodiscard]] inline std::string_view view_right_padded(const char *field, size_t len) {
     DEBUG_ASSERT(field != nullptr);
 
