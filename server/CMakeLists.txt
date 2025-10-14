@@ -19,7 +19,7 @@ endfunction()
 validate_uint16(SOUPBIN_POLL_MS)
 validate_uint16(SOUPBIN_MAX_CLIENTS)
 validate_uint16(SOUPBIN_BATCH_SIZE)
-validate_uint16(SOUPBIN_MAX_PB_CLIENTS_NEW)
+validate_uint16(SOUPBIN_MAX_PB_NEW_CLIENTS)
 validate_uint16(SOUPBIN_MAX_PB_CLIENT_RECV)
 
 configure_file(
@@ -39,7 +39,6 @@ target_sources(soupbin_server
         src/server.cpp
         src/detail/client_manager.cpp
         src/detail/session.cpp
-        src/detail/session_store.cpp
 )
 
 target_include_directories(soupbin_server
@@ -69,6 +68,7 @@ target_compile_definitions(soupbin_server
 if(SOUPBIN_BUILD_TESTS)
     add_executable(soupbin_server_tests
         test/test_client_manager.cpp
+        test/test_session.cpp
     )
 
     target_link_libraries(soupbin_server_tests

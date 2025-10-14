@@ -21,7 +21,6 @@ constexpr const char *strip_source_dir(const char *path) {
     return (*prefix_ptr == '\0') ? path_ptr : path;
 }
 
-// TODO: https://github.com/gabime/spdlog/issues/1797
 #define LOG_IMPL(level, msg, ...)                                                                                           \
     do {                                                                                                                    \
         spdlog::level("[{}:{}] " msg, strip_source_dir(__FILE__), __LINE__, ##__VA_ARGS__);                                 \

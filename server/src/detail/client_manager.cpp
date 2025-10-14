@@ -283,7 +283,7 @@ void client_manager::process(cm_batch_context &ctx) noexcept {
             std::swap(activity_info_[i], activity_info_.back());
 
             auto &swapped = random_access_[i];
-            const detail::cl_descriptor old_descriptor = swapped.descriptor;
+            const cl_descriptor old_descriptor = swapped.descriptor;
 
             swapped.descriptor.handle = detail::client_handle_t(i);
 
@@ -332,7 +332,7 @@ void client_manager::process(cm_batch_context &ctx) noexcept {
     DEBUG_ASSERT_SOA();
 }
 
-void client_manager::assert_consistency() const noexcept {
+const std::vector<cl_random_access> &client_manager::assert_consistency() const noexcept {
 #ifndef NDEBUG
     DEBUG_ASSERT(detail::verify_epoll(epoll_));
     DEBUG_ASSERT(detail::verify_listener(listener_));
@@ -350,11 +350,12 @@ void client_manager::assert_consistency() const noexcept {
         seen_fds.insert(client.descriptor.fd);
 
         if (client.authed()) {
-            DEBUG_ASSERT(std::ranges::any_of(client.session->subscribers(),
-                                             [client](const auto &sub) { return client.descriptor == sub.descriptor; }));
+            DEBUG_ASSERT(std::ranges::count(client.session->subscribers(), client.descriptor,
+                                            &detail::sn_subscriber::descriptor) == 1);
         }
     }
 #endif
+    return random_access_;
 }
 
 } // namespace soupbin::detail

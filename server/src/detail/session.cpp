@@ -142,7 +142,7 @@ std::unordered_set<detail::cl_descriptor> session::assert_consistency() const no
 
     for (size_t i = 1; i < boundaries_.size(); i++) {
         DEBUG_ASSERT(boundaries_[i - 1] < boundaries_[i]);
-        DEBUG_ASSERT(boundaries_[i] - boundaries_[i - 1] > sizeof(detail::msg_header)); // TODO: Minimum message size.
+        DEBUG_ASSERT(boundaries_[i] - boundaries_[i - 1] > detail::msg_minimum_size);
     }
 
     return seen;

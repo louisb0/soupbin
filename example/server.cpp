@@ -1,17 +1,18 @@
 #include <soupbin/server.hpp>
 
+#include <cstdlib>
 #include <iostream>
 
 bool handle_auth(std::string_view username, std::string_view password) {
     (void)username;
-    return password == "abc";
+    return password == "pass";
 }
 
 void handle_client_msgs(std::string_view session_id, std::span<soupbin::message_descriptor> descriptors,
                         const soupbin::reply_handler &on_reply) {
     (void)session_id;
     for (const auto &desc : descriptors) {
-        std::error_code err = on_reply(soupbin::message_type::unsequenced, { desc.offset, desc.len });
+        std::error_code err = on_reply(soupbin::message_type::sequenced, { desc.offset, desc.len });
         if (err) {
             std::cerr << "[" << err.category().name() << "]: " << err.message() << '\n';
         }
@@ -36,11 +37,6 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    auto err = server->run();
-    if (err) {
-        std::cerr << "[" << err.category().name() << "]: " << err.message() << '\n';
-        return EXIT_FAILURE;
-    }
-
+    server->run();
     return EXIT_SUCCESS;
 }

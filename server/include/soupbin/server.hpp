@@ -55,7 +55,7 @@ public:
     server &operator=(server &&) noexcept;
     ~server() noexcept;
 
-    [[nodiscard]] std::error_code run() noexcept;
+    void run() noexcept;
 
 private:
     class impl;

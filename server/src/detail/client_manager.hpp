@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -58,6 +59,9 @@ public:
         bad_session,
     };
 
+    [[nodiscard]] cm_batch_context() noexcept = default;
+    [[nodiscard]] cm_batch_context(std::span<cl_random_access *const> ready, detail::client_count_t auth_end) noexcept;
+
     cm_batch_context(const cm_batch_context &) = delete;
     cm_batch_context &operator=(const cm_batch_context &) = delete;
     cm_batch_context(cm_batch_context &&) noexcept = default;
@@ -82,9 +86,6 @@ private:
 
     std::span<cl_random_access *const> ready_;
     detail::client_count_t auth_end_{};
-
-    [[nodiscard]] cm_batch_context() noexcept = default;
-    [[nodiscard]] cm_batch_context(std::span<cl_random_access *const> ready, detail::client_count_t auth_end) noexcept;
 };
 
 // ============================================================================
@@ -108,7 +109,8 @@ public:
     [[nodiscard]] size_t capacity() const noexcept { return random_access_.capacity(); }
     [[nodiscard]] size_t size() const noexcept { return random_access_.size(); }
 
-    void assert_consistency() const noexcept;
+    // NOLINTNEXTLINE(modernize-use-nodiscard)
+    const std::vector<detail::cl_random_access> &assert_consistency() const noexcept;
 
 private:
     struct cl_activity_info {

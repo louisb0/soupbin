@@ -10,9 +10,9 @@
 #include <cstring>
 #include <limits>
 
-namespace soupbin::detail {
-
 // TODO: Shared with client module - should be extracted alongside messages.
+
+namespace soupbin::detail {
 
 template <size_t N>
 class partial {
