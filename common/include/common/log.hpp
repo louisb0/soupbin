@@ -1,14 +1,30 @@
 #pragma once
 
-#include <source_location>
-
 #include <spdlog/spdlog.h>
 
 #ifdef SOUPBIN_LOGGING_ENABLED
+#ifndef SOUPBIN_SOURCE_DIR
+#error "SOUPBIN_SOURCE_DIR must defined when SOUPBIN_LOGGING_ENABLED is set."
+#endif
+
+constexpr const char *strip_source_dir(const char *path) {
+    const char *prefix = SOUPBIN_SOURCE_DIR;
+
+    const char *path_ptr = path;
+    const char *prefix_ptr = prefix;
+
+    while (*prefix_ptr != '\0' && *path_ptr == *prefix_ptr) {
+        ++path_ptr;
+        ++prefix_ptr;
+    }
+
+    return (*prefix_ptr == '\0') ? path_ptr : path;
+}
+
+// TODO: https://github.com/gabime/spdlog/issues/1797
 #define LOG_IMPL(level, msg, ...)                                                                                           \
     do {                                                                                                                    \
-        auto loc = std::source_location::current();                                                                         \
-        spdlog::level("[{}] " msg, loc.function_name(), ##__VA_ARGS__);                                                     \
+        spdlog::level("[{}:{}] " msg, strip_source_dir(__FILE__), __LINE__, ##__VA_ARGS__);                                 \
     } while (0)
 #else
 #define LOG_IMPL(level, msg, ...) ((void)0)
