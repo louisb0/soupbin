@@ -9,14 +9,12 @@
 #include "detail/partial.hpp"
 #include "detail/session.hpp"
 #include "detail/types.hpp"
-#include "detail/verify.hpp"
-
-#include "server.hpp"
 
 #include "common/assert.hpp"
-#include "common/config.hpp"
 #include "common/log.hpp"
 #include "common/util.hpp"
+
+#include "server.hpp"
 
 #include <algorithm>
 #include <array>
@@ -26,6 +24,7 @@
 #include <format>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <system_error>
@@ -37,7 +36,6 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
-#include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>

@@ -5,10 +5,6 @@
 #include "detail/session.hpp"
 #include "detail/types.hpp"
 
-#include "server.hpp"
-
-#include "common/assert.hpp"
-#include "common/log.hpp"
 #include "common/util.hpp"
 
 #include <algorithm>
@@ -16,7 +12,6 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <span>
 #include <string>
 #include <vector>

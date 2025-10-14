@@ -9,13 +9,9 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <span>
-#include <unordered_set>
 #include <variant>
 #include <vector>
-
-#include <sys/epoll.h>
 
 namespace soupbin::detail {
 class session;

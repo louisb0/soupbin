@@ -17,10 +17,10 @@ IncludeCategories:
   - Regex: '^"detail/'
     Priority: 20
 
-  - Regex: '^"server\.hpp"$'
+  - Regex: '^"common/'
     Priority: 30
 
-  - Regex: '^"common/'
+  - Regex: '^"server\.hpp"$'
     Priority: 40
 
   - Regex: '^"'

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "detail/client_manager.hpp"
+#include "detail/messages.hpp"
 #include "detail/session.hpp"
 #include "detail/types.hpp"
 
@@ -11,14 +12,19 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <span>
-#include <thread>
+#include <string>
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 using namespace soupbin;

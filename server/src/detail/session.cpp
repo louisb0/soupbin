@@ -7,11 +7,10 @@
 #include "detail/types.hpp"
 #include "detail/verify.hpp"
 
-#include "server.hpp"
-
 #include "common/assert.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <unordered_set>
