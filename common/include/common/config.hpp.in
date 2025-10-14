@@ -1,0 +1,10 @@
+#pragma once
+
+#include <cstdint>
+
+namespace soupbin::detail {
+
+constexpr uint16_t server_heartbeat_sec { @SOUPBIN_SERVER_HEARTBEAT_SEC@ };
+constexpr uint16_t client_heartbeat_sec { @SOUPBIN_CLIENT_HEARTBEAT_SEC@ };
+
+} // namespace soupbin::detail

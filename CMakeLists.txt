@@ -1,30 +1,43 @@
 cmake_minimum_required(VERSION 3.20)
-project(soupbin)
+project(soupbin VERSION 1.0.0 LANGUAGES CXX)
 
-option(SOUPBIN_ENABLE_LOGGING "Enable logging" ON)
-option(SOUPBIN_BUILD_TESTS "Build tests" ON)
+# ============================================================================
+# Options
+# ============================================================================
+option(SOUPBIN_BUILD_TESTS "Build unit tests" ON)
+option(SOUPBIN_BUILD_EXAMPLES "Build example programs" ON)
+option(SOUPBIN_ENABLE_LOGGING "Enable logging support" ON)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wshadow -Wnon-virtual-dtor")
-
-set(CMAKE_CXX_FLAGS_DEBUG "-g -Og -fsanitize=address,undefined -fsanitize-undefined-trap-on-error -fno-omit-frame-pointer ")
-set(CMAKE_EXE_LINKER_FLAGS_DEBUG "-fsanitize=address,undefined")
-set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "-fsanitize=address,undefined")
-if(CMAKE_BUILD_TYPE STREQUAL "debug")
-    set(ENV{ASAN_OPTIONS} "abort_on_error=1")
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose: Debug Profile Release" FORCE)
 endif()
 
-set(CMAKE_CXX_FLAGS_PROFILE "-g3 -O3 -DNDEBUG -fno-omit-frame-pointer")
-set(CMAKE_EXE_LINKER_FLAGS_PROFILE "")
-set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "")
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Profile" "Release")
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
-set(CMAKE_EXE_LINKER_FLAGS_RELEASE "-s")
-set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "-s")
+# ============================================================================
+# Compiler Flags
+# ============================================================================
+add_compile_options(-Wall -Wextra -Wshadow -Wnon-virtual-dtor -pedantic)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_options(-g -Og -fno-omit-frame-pointer)
+    add_compile_options(-fsanitize=address,undefined)
+    add_link_options(-fsanitize=address,undefined)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Profile")
+    add_compile_options(-g3 -O3 -fno-omit-frame-pointer)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_compile_options(-O3)
+    add_link_options(-s)
+endif()
+
+# ============================================================================
+# Dependencies
+# ============================================================================
 if(SOUPBIN_BUILD_TESTS)
     include(FetchContent)
     FetchContent_Declare(
@@ -34,9 +47,17 @@ if(SOUPBIN_BUILD_TESTS)
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(googletest)
+    enable_testing()
+    include(GoogleTest)
 endif()
 
+# ============================================================================
+# Targets
+# ============================================================================
 add_subdirectory(common)
 add_subdirectory(server)
 add_subdirectory(client)
-add_subdirectory(example)
+
+if(SOUPBIN_BUILD_EXAMPLES)
+    add_subdirectory(example)
+endif()

@@ -30,7 +30,7 @@
   scripts = {
     setup.exec = ''
       if [ -z "$1" ]; then
-        echo "Usage: setup <debug|release|profile>"
+        echo "Usage: <cmd> <debug|release|profile>"
         exit 1
       fi
 
@@ -54,24 +54,7 @@
     '';
 
     build.exec = ''
-      if [ -z "$1" ]; then
-        echo "Usage: build <debug|release|profile>"
-        exit 1
-      fi
-
-      BUILD_TYPE=$(echo $1 | tr '[:upper:]' '[:lower:]')
-
-      case $BUILD_TYPE in
-        debug|release|profile)
-          setup $BUILD_TYPE
-          cmake --build build/$BUILD_TYPE
-          ;;
-        *)
-          echo "Error: Unknown build type '$1'"
-          echo "Valid options: debug, release, profile"
-          exit 1
-          ;;
-      esac
+      setup "$1" && cmake --build build/$(echo $1 | tr '[:upper:]' '[:lower:]')
     '';
 
     clean.exec = ''

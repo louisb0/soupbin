@@ -2,7 +2,6 @@ BasedOnStyle: LLVM
 IndentWidth: 4
 ColumnLimit: 125
 AccessModifierOffset: -4
-NamespaceIndentation: Inner
 Cpp11BracedListStyle: false
 AlwaysBreakTemplateDeclarations: Yes
 
@@ -11,40 +10,27 @@ IncludeBlocks: Regroup
 IncludeCategories:
   - Regex: '^<gtest/'
     Priority: 0
-    SortPriority: 0
-    CaseSensitive: true
 
   - Regex: '^[<"]soupbin/'
-    Priority: 1
-    SortPriority: 1
-    CaseSensitive: true
-
-  - Regex: '^"common/'
-    Priority: 2
-    SortPriority: 2
-    CaseSensitive: true
+    Priority: 10
 
   - Regex: '^"detail/'
-    Priority: 3
-    SortPriority: 3
-    CaseSensitive: true
+    Priority: 20
+
+  - Regex: '^"server\.hpp"$'
+    Priority: 30
+
+  - Regex: '^"common/'
+    Priority: 40
 
   - Regex: '^"'
-    Priority: 4
-    SortPriority: 4
-    CaseSensitive: true
+    Priority: 50
 
   - Regex: '^<[^.]*>$'
-    Priority: 5
-    SortPriority: 5
-    CaseSensitive: true
+    Priority: 60
 
   - Regex: '^<.*\.h>$'
-    Priority: 6
-    SortPriority: 6
-    CaseSensitive: true
+    Priority: 70
 
   - Regex: '.*'
-    Priority: 7
-    SortPriority: 7
-    CaseSensitive: true
+    Priority: 80

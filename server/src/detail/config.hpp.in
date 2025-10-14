@@ -1,0 +1,40 @@
+#pragma once
+
+#include "detail/messages.hpp"
+
+#include <cstdint>
+
+namespace soupbin::detail {
+namespace {
+constexpr size_t div_ceil(size_t n, size_t d) { return (n + d - 1) / d; }
+} // namespace
+
+// ============================================================================
+// General.
+// ============================================================================
+inline constexpr uint8_t cache_line_size = 64;
+inline constexpr uint8_t max_payload_size = 2 * cache_line_size;
+inline constexpr uint8_t max_message_size = sizeof(detail::msg_header) + max_payload_size;
+
+inline constexpr uint16_t poll_ms { @SOUPBIN_POLL_MS@ };
+inline constexpr uint16_t max_clients { @SOUPBIN_MAX_CLIENTS@ };
+inline constexpr uint16_t batch_size { @SOUPBIN_BATCH_SIZE@ };
+
+// ============================================================================
+// Per-batch (PB).
+// ============================================================================
+inline constexpr uint16_t max_pb_new_clients { @SOUPBIN_MAX_PB_NEW_CLIENTS@ };
+
+inline constexpr uint16_t max_pb_client_recv { @SOUPBIN_MAX_PB_CLIENT_RECV@ };
+inline constexpr uint16_t max_pb_client_num_data_msg = div_ceil(max_pb_client_recv, sizeof(detail::msg_header) + 1);
+
+inline constexpr uint64_t max_pb_total_recv = static_cast<uint64_t>(batch_size) * max_pb_client_recv;
+inline constexpr uint64_t max_pb_total_num_data_msg = static_cast<uint64_t>(batch_size) * max_pb_client_num_data_msg;
+
+// ============================================================================
+// Verification.
+// ============================================================================
+static_assert(batch_size <= max_clients);
+static_assert(max_pb_new_clients <= max_clients);
+
+} // namespace soupbin::detail
