@@ -6,6 +6,7 @@
 
 #include "common/assert.hpp"
 #include "common/log.hpp"
+#include "common/util.hpp"
 
 #include <algorithm>
 #include <array>
@@ -191,11 +192,11 @@ TEST_F(ClientManagerTest, Ordering) {
     EXPECT_EQ(ctx.authed().size(), 0);
     EXPECT_EQ(ctx.unauthed().size(), 4);
 
-    detail::session session1(detail::generate_session_id(), "s1");
+    detail::session session1(generate_alphanumeric(detail::session_id_len), "s1");
     session1.subscribe(*ctx.all()[0], detail::seq_num_t(0));
     session1.subscribe(*ctx.all()[1], detail::seq_num_t(0));
 
-    detail::session session2(detail::generate_session_id(), "s2");
+    detail::session session2(generate_alphanumeric(detail::session_id_len), "s2");
     session2.subscribe(*ctx.all()[2], detail::seq_num_t(0));
 
     cmgr.process(ctx);
@@ -249,7 +250,7 @@ TEST_F(ClientManagerTest, DropHandleManagement) {
     EXPECT_EQ(ctx.authed().size(), 0);
     EXPECT_EQ(ctx.unauthed().size(), 3);
 
-    detail::session session(detail::generate_session_id(), "s1");
+    detail::session session(generate_alphanumeric(detail::session_id_len), "s1");
     std::ranges::for_each(ctx.all(), [&session](auto *cl) { session.subscribe(*cl, detail::seq_num_t(0)); });
 
     cmgr.process(ctx);
