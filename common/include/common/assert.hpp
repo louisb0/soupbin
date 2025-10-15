@@ -5,6 +5,8 @@
 
 #include <spdlog/spdlog.h>
 
+namespace soupbin::common {
+
 #define PANIC(message, ...)                                                                                                 \
     do {                                                                                                                    \
         spdlog::critical("[{}:{}] Panic: " message, __FILE__, __LINE__, ##__VA_ARGS__);                                     \
@@ -40,3 +42,5 @@
 #if !defined(NFUZZ) && defined(NDEBUG)
 #error "Fuzzing requires a debug build."
 #endif
+
+} // namespace soupbin::common

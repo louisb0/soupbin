@@ -2,12 +2,12 @@
 
 #include "detail/client_manager.hpp"
 #include "detail/config.hpp"
-#include "detail/messages.hpp"
 #include "detail/network.hpp"
 #include "detail/types.hpp"
-#include "detail/verify.hpp"
 
 #include "common/assert.hpp"
+#include "common/messages.hpp"
+#include "common/verify.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -21,12 +21,12 @@
 namespace soupbin::detail {
 
 session::session(std::string id, std::string owner) noexcept : id_(std::move(id)), owner_(std::move(owner)) {
-    DEBUG_ASSERT(id_.size() == detail::session_id_len);
-    DEBUG_ASSERT(owner_.size() <= detail::username_len);
+    DEBUG_ASSERT(id_.size() == common::msg_session_id_len);
+    DEBUG_ASSERT(owner_.size() <= common::msg_username_len);
     DEBUG_ASSERT(!owner_.empty());
 }
 
-void session::subscribe(detail::cl_random_access &client, detail::seq_num_t from) noexcept {
+void session::subscribe(detail::cl_random_access &client, common::seq_num_t from) noexcept {
     DEBUG_ASSERT(from <= message_count());
     DEBUG_ASSERT(!client.authed());
     DEBUG_ASSERT(!std::ranges::contains(subscribers_, client.descriptor, &detail::sn_subscriber::descriptor));
@@ -51,9 +51,9 @@ void session::append_seq_msg(std::span<const std::byte> payload) noexcept {
     DEBUG_ASSERT(payload.size() <= detail::max_payload_size);
     DEBUG_ASSERT(!subscribers_.empty());
 
-    const detail::msg_header header{
+    const common::msg_header header{
         .length = htons(static_cast<uint16_t>(payload.size())),
-        .type = detail::mt_sequenced,
+        .type = common::mt_sequenced,
     };
 
     boundaries_.emplace_back(stream_.size());
@@ -75,7 +75,7 @@ void session::catchup(detail::cm_batch_context &ctx) noexcept {
             continue;
         }
 
-        const size_t start = boundaries_[detail::ts::get(sub.seq_num)];
+        const size_t start = boundaries_[common::ts::get(sub.seq_num)];
         const size_t end = stream_.size();
 
         if (auto failed = detail::send_all(sub.descriptor, &stream_[start], end - start)) {
@@ -90,8 +90,8 @@ void session::catchup(detail::cm_batch_context &ctx) noexcept {
 
 std::unordered_set<detail::cl_descriptor> session::assert_consistency() const noexcept {
 #ifndef NDEBUG
-    DEBUG_ASSERT(id_.size() == detail::session_id_len);
-    DEBUG_ASSERT(owner_.length() <= detail::username_len);
+    DEBUG_ASSERT(id_.size() == common::msg_session_id_len);
+    DEBUG_ASSERT(owner_.length() <= common::msg_username_len);
     DEBUG_ASSERT(!owner_.empty());
 
     // ----------------------------------------
@@ -101,7 +101,7 @@ std::unordered_set<detail::cl_descriptor> session::assert_consistency() const no
     for (const auto &sub : subscribers_) {
         DEBUG_ASSERT(sub.seq_num <= message_count());
 
-        DEBUG_ASSERT(detail::verify_fd(sub.descriptor.fd));
+        DEBUG_ASSERT(common::verify_fd(sub.descriptor.fd));
         DEBUG_ASSERT(!seen.contains(sub.descriptor));
         seen.insert(sub.descriptor);
     }
@@ -118,15 +118,15 @@ std::unordered_set<detail::cl_descriptor> session::assert_consistency() const no
         DEBUG_ASSERT(boundaries_[message_count] == parsed);
 
         const size_t available = buf_len - parsed;
-        DEBUG_ASSERT(available > sizeof(detail::msg_header));
+        DEBUG_ASSERT(available > sizeof(common::msg_header));
 
-        const auto *header = reinterpret_cast<const detail::msg_header *>(buf + parsed);
-        DEBUG_ASSERT(header->type == detail::mt_sequenced);
+        const auto *header = reinterpret_cast<const common::msg_header *>(buf + parsed);
+        DEBUG_ASSERT(header->type == common::mt_sequenced);
 
         const size_t payload_len = ntohs(header->length);
         DEBUG_ASSERT(payload_len <= detail::max_payload_size);
 
-        const size_t message_len = sizeof(detail::msg_header) + payload_len;
+        const size_t message_len = sizeof(common::msg_header) + payload_len;
         DEBUG_ASSERT(available >= message_len);
 
         parsed += message_len;
@@ -141,7 +141,7 @@ std::unordered_set<detail::cl_descriptor> session::assert_consistency() const no
 
     for (size_t i = 1; i < boundaries_.size(); i++) {
         DEBUG_ASSERT(boundaries_[i - 1] < boundaries_[i]);
-        DEBUG_ASSERT(boundaries_[i] - boundaries_[i - 1] > detail::msg_minimum_size);
+        DEBUG_ASSERT(boundaries_[i] - boundaries_[i - 1] > common::msg_minimum_size);
     }
 
     return seen;

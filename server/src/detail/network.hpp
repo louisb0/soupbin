@@ -20,7 +20,7 @@ namespace soupbin::detail {
 send_all(const detail::cl_descriptor &descriptor, const std::byte *buf, size_t len) noexcept {
     size_t sent = 0;
     while (sent < len) {
-        const ssize_t n = send(detail::ts::get(descriptor.fd), buf + sent, len - sent, MSG_NOSIGNAL);
+        const ssize_t n = send(common::ts::get(descriptor.fd), buf + sent, len - sent, MSG_NOSIGNAL);
 
         if (n == -1) {
             if (errno == EINTR) {
@@ -48,7 +48,7 @@ send_all(const detail::cl_descriptor &descriptor, const std::byte *buf, size_t l
 [[nodiscard]] inline std::optional<detail::cm_batch_context::drop_reason>
 recv_all(const detail::cl_descriptor &descriptor, std::byte *buf, size_t len, size_t &read) noexcept {
     while (read < len) {
-        const ssize_t n = recv(detail::ts::get(descriptor.fd), buf + read, len - read, MSG_DONTWAIT);
+        const ssize_t n = recv(common::ts::get(descriptor.fd), buf + read, len - read, MSG_DONTWAIT);
 
         if (n == -1) {
             if (errno == EINTR) {

@@ -8,18 +8,18 @@
 
 #include <arpa/inet.h>
 
-namespace soupbin::detail {
+namespace soupbin::common {
 
 // ============================================================================
 // Types.
 // ============================================================================
 
-static constexpr uint8_t username_len = 6;
-static constexpr uint8_t password_len = 10;
-static constexpr uint8_t session_id_len = 10;
-static constexpr uint8_t sequence_num_len = 20;
+static constexpr uint8_t msg_username_len = 6;
+static constexpr uint8_t msg_password_len = 10;
+static constexpr uint8_t msg_session_id_len = 10;
+static constexpr uint8_t msg_sequence_num_len = 20;
 
-enum message_type : uint8_t {
+enum msg_type : uint8_t {
     mt_debug = '+',
     mt_unsequenced = 'U',
 
@@ -34,7 +34,7 @@ enum message_type : uint8_t {
     mt_logout_request = 'O',
 };
 
-enum reject_code : uint8_t {
+enum msg_reject_code : uint8_t {
     rej_not_authenticated = 'A',
     rej_no_session = 'S',
 };
@@ -46,31 +46,31 @@ enum reject_code : uint8_t {
 
 struct __attribute__((packed)) msg_header {
     uint16_t length;
-    message_type type;
+    msg_type type;
 };
 
 struct __attribute__((packed)) msg_login_request {
     msg_header hdr;
-    char username[username_len];
-    char password[password_len];
-    char session_id[session_id_len];
-    char sequence_num[sequence_num_len];
+    char username[msg_username_len];
+    char password[msg_password_len];
+    char session_id[msg_session_id_len];
+    char sequence_num[msg_sequence_num_len];
 };
 
 struct __attribute__((packed)) msg_login_accepted {
     msg_header hdr;
-    char session_id[session_id_len];
-    char sequence_num[sequence_num_len];
+    char session_id[msg_session_id_len];
+    char sequence_num[msg_sequence_num_len];
 
     [[nodiscard]] static msg_login_accepted build(std::string_view session_id, std::string_view sequence_num) {
-        DEBUG_ASSERT(session_id.length() == session_id_len);
-        DEBUG_ASSERT(sequence_num.length() == sequence_num_len);
+        DEBUG_ASSERT(session_id.length() == msg_session_id_len);
+        DEBUG_ASSERT(sequence_num.length() == msg_sequence_num_len);
 
         msg_login_accepted msg{};
         msg.hdr.length = htons(sizeof(msg) - sizeof(msg.hdr));
         msg.hdr.type = mt_login_accepted;
-        std::memcpy(msg.session_id, session_id.data(), session_id_len);
-        std::memcpy(msg.sequence_num, sequence_num.data(), sequence_num_len);
+        std::memcpy(msg.session_id, session_id.data(), msg_session_id_len);
+        std::memcpy(msg.sequence_num, sequence_num.data(), msg_sequence_num_len);
 
         return msg;
     }
@@ -78,7 +78,7 @@ struct __attribute__((packed)) msg_login_accepted {
 
 struct __attribute__((packed)) msg_login_rejected {
     msg_header hdr;
-    reject_code reason;
+    msg_reject_code reason;
 
     static const msg_login_rejected prebuilt_auth;
     static const msg_login_rejected prebuilt_session;
@@ -123,4 +123,4 @@ constexpr size_t msg_minimum_size = sizeof(msg_header);
     return view.substr(start);
 }
 
-} // namespace soupbin::detail
+} // namespace soupbin::common

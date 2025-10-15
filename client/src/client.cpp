@@ -20,7 +20,7 @@ void client::recv(std::span<std::byte> buffer) noexcept { impl_->recv(buffer); }
 bool client::try_recv(std::span<std::byte> buffer) noexcept { return impl_->try_recv(buffer); }
 bool client::send(message_type type, std::span<const std::byte> payload) noexcept { return impl_->send(type, payload); }
 
-void client::disconnect() noexcept { impl_->disconnect(); }
+bool client::disconnect() noexcept { return impl_->disconnect(); }
 bool client::connected() const noexcept { return impl_->connected(); }
 
 const std::string &client::session_id() const noexcept { return impl_->session_id(); }
@@ -30,15 +30,14 @@ size_t client::sequence_num() const noexcept { return impl_->sequence_num(); }
 // Definitions.
 // ============================================================================
 
-client::impl::impl() noexcept {}
+client::impl::impl(std::jthread thread, std::string session_id, common::seq_num_t sequence_num) noexcept
+    : thread_(std::move(thread)), session_id_(std::move(session_id)), sequence_num_(sequence_num) {}
 
 void client::impl::recv(std::span<std::byte>) noexcept {}
 
 bool client::impl::try_recv(std::span<std::byte>) noexcept { return false; }
 
 bool client::impl::send(message_type type, std::span<const std::byte> payload) noexcept { return false; }
-
-void client::impl::disconnect() noexcept {}
 
 void client::impl::assert_consistency() const noexcept {}
 

@@ -1,7 +1,6 @@
 #include "detail/client_manager.hpp"
 
 #include "detail/config.hpp"
-#include "detail/messages.hpp"
 #include "detail/network.hpp"
 #include "detail/session.hpp"
 #include "detail/types.hpp"
@@ -10,6 +9,8 @@
 #include "common/assert.hpp"
 #include "common/config.hpp"
 #include "common/log.hpp"
+#include "common/messages.hpp"
+#include "common/verify.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -76,8 +77,8 @@ void cm_batch_context::mark_drop(detail::client_handle_t handle, drop_reason rea
         return "unknown";
     }();
 
-    drop_list_[detail::ts::get(handle)] = true;
-    LOG_INFO("client={} added to drop list (reason={})", detail::ts::get(handle), reason_str);
+    drop_list_[common::ts::get(handle)] = true;
+    LOG_INFO("client={} added to drop list (reason={})", common::ts::get(handle), reason_str);
 }
 
 // ============================================================================
@@ -89,21 +90,21 @@ void cm_batch_context::mark_drop(detail::client_handle_t handle, drop_reason rea
     DEBUG_ASSERT(random_access_.capacity() == activity_info_.capacity());                                                   \
     DEBUG_ASSERT(random_access_.capacity() == capacity_)
 
-client_manager::client_manager(detail::valid_fd_t epoll, detail::valid_fd_t listener) noexcept
+client_manager::client_manager(common::valid_fd_t epoll, common::valid_fd_t listener) noexcept
     : epoll_(epoll), listener_(listener), capacity_(detail::max_clients) {
     ASSERT(detail::verify_epoll(epoll_));
     ASSERT(detail::verify_listener(listener_));
 
-    random_access_.reserve(detail::ts::get(capacity_));
-    activity_info_.reserve(detail::ts::get(capacity_));
+    random_access_.reserve(common::ts::get(capacity_));
+    activity_info_.reserve(common::ts::get(capacity_));
 }
 
 client_manager::~client_manager() {
-    if (close(detail::ts::get(epoll_)) == -1) {
+    if (close(common::ts::get(epoll_)) == -1) {
         LOG_ERROR("failed to close epoll instance: {}", std::strerror(errno));
     }
 
-    if (close(detail::ts::get(listener_)) == -1) {
+    if (close(common::ts::get(listener_)) == -1) {
         LOG_ERROR("failed to close listener socket: {}", std::strerror(errno));
     }
 }
@@ -116,7 +117,7 @@ size_t client_manager::onboard(detail::client_count_t max) noexcept {
     const auto now = std::chrono::steady_clock::now();
 
     const size_t available = random_access_.capacity() - size();
-    const size_t attempts = std::min(static_cast<size_t>(detail::ts::get(max)), available);
+    const size_t attempts = std::min(static_cast<size_t>(common::ts::get(max)), available);
 
     size_t accepted = 0;
     for (size_t i = 0; i < attempts; i++) {
@@ -126,7 +127,7 @@ size_t client_manager::onboard(detail::client_count_t max) noexcept {
         // ----------------------------------------
         // (1) Accept.
         // ----------------------------------------
-        int fd = accept(detail::ts::get(listener_), reinterpret_cast<sockaddr *>(&addr), &addrlen);
+        int fd = accept(common::ts::get(listener_), reinterpret_cast<sockaddr *>(&addr), &addrlen);
         if (fd == -1) {
             if (errno == EINTR) {
                 continue;
@@ -147,7 +148,7 @@ size_t client_manager::onboard(detail::client_count_t max) noexcept {
         // (2) Add.
         // ----------------------------------------
         const cl_descriptor desc{
-            .fd = detail::valid_fd_t(fd),
+            .fd = common::valid_fd_t(fd),
             .handle = detail::client_handle_t(random_access_.size()),
         };
 
@@ -155,7 +156,7 @@ size_t client_manager::onboard(detail::client_count_t max) noexcept {
             .events = EPOLLIN,
             .data = { .u32 = cl_epoll_data{ .descriptor = desc }.u32 },
         };
-        if (epoll_ctl(detail::ts::get(epoll_), EPOLL_CTL_ADD, detail::ts::get(desc.fd), &ev) == -1) {
+        if (epoll_ctl(common::ts::get(epoll_), EPOLL_CTL_ADD, common::ts::get(desc.fd), &ev) == -1) {
             if (errno == ENOMEM) {
                 PANIC("out of memory.");
             }
@@ -188,7 +189,7 @@ cm_batch_context client_manager::poll(std::chrono::milliseconds timeout) noexcep
     // (1) Poll.
     // ----------------------------------------
     std::array<epoll_event, detail::batch_size> events{};
-    const int nfds = epoll_wait(detail::ts::get(epoll_), events.data(), static_cast<int>(events.size()),
+    const int nfds = epoll_wait(common::ts::get(epoll_), events.data(), static_cast<int>(events.size()),
                                 static_cast<int>(timeout.count()));
     if (nfds == -1) {
         if (errno == EINTR) {
@@ -204,10 +205,10 @@ cm_batch_context client_manager::poll(std::chrono::milliseconds timeout) noexcep
         const auto handle = data.descriptor.handle;
 
         DEBUG_ASSERT(handle < random_access_.size());
-        DEBUG_ASSERT(random_access_[detail::ts::get(handle)].descriptor.handle == handle);
-        DEBUG_ASSERT(random_access_[detail::ts::get(handle)].descriptor.fd == data.descriptor.fd);
+        DEBUG_ASSERT(random_access_[common::ts::get(handle)].descriptor.handle == handle);
+        DEBUG_ASSERT(random_access_[common::ts::get(handle)].descriptor.fd == data.descriptor.fd);
 
-        ready_buffer_[i] = std::addressof(random_access_[detail::ts::get(handle)]);
+        ready_buffer_[i] = std::addressof(random_access_[common::ts::get(handle)]);
     }
 
     // ----------------------------------------
@@ -246,23 +247,23 @@ void client_manager::process(cm_batch_context &ctx) noexcept {
 
     // NOTE(perf): activity_info_ in L1 for random access following predictable linear walk.
     for (const auto *client : ctx.all()) {
-        activity_info_[detail::ts::get(client->descriptor.handle)].last_recv = now;
+        activity_info_[common::ts::get(client->descriptor.handle)].last_recv = now;
     }
 
     // 1.2 Process heartbeats.
     for (size_t i = 0; i < activity_info_.size(); i++) {
         auto &[last_send, last_recv] = activity_info_[i];
 
-        if (now - last_recv >= std::chrono::seconds(detail::client_heartbeat_sec)) {
+        if (now - last_recv >= std::chrono::seconds(common::client_heartbeat_sec)) {
             ctx.mark_drop(detail::client_handle_t(i), cm_batch_context::drop_reason::no_heartbeat);
             continue;
         }
 
-        if (now - last_send >= std::chrono::seconds(detail::server_heartbeat_sec - 1)) {
-            static const auto *heartbeat_buf = reinterpret_cast<const std::byte *>(&detail::msg_server_heartbeat::prebuilt);
+        if (now - last_send >= std::chrono::seconds(common::server_heartbeat_sec - 1)) {
+            static const auto *heartbeat_buf = reinterpret_cast<const std::byte *>(&common::msg_server_heartbeat::prebuilt);
 
             auto &client = random_access_[i];
-            if (auto failed = detail::send_all(client.descriptor, heartbeat_buf, sizeof(detail::msg_server_heartbeat))) {
+            if (auto failed = detail::send_all(client.descriptor, heartbeat_buf, sizeof(common::msg_server_heartbeat))) {
                 ctx.mark_drop(client.descriptor.handle, *failed);
                 continue;
             }
@@ -294,7 +295,7 @@ void client_manager::process(cm_batch_context &ctx) noexcept {
                 .events = EPOLLIN,
                 .data = { .u32 = cl_epoll_data{ .descriptor = swapped.descriptor }.u32 },
             };
-            if (epoll_ctl(detail::ts::get(epoll_), EPOLL_CTL_MOD, detail::ts::get(swapped.descriptor.fd), &ev) == -1) {
+            if (epoll_ctl(common::ts::get(epoll_), EPOLL_CTL_MOD, common::ts::get(swapped.descriptor.fd), &ev) == -1) {
                 if (errno == ENOMEM) {
                     PANIC("out of memory.");
                 }
@@ -313,14 +314,14 @@ void client_manager::process(cm_batch_context &ctx) noexcept {
         // 2.2 Pop.
         auto &to_pop = random_access_.back();
 
-        if (epoll_ctl(detail::ts::get(epoll_), EPOLL_CTL_DEL, detail::ts::get(to_pop.descriptor.fd), nullptr) == -1) {
+        if (epoll_ctl(common::ts::get(epoll_), EPOLL_CTL_DEL, common::ts::get(to_pop.descriptor.fd), nullptr) == -1) {
             if (errno == ENOMEM) {
                 PANIC("out of memory.");
             }
 
             PANIC("unexpected error: {}", std::strerror(errno));
         }
-        if (close(detail::ts::get(to_pop.descriptor.fd)) == -1) {
+        if (close(common::ts::get(to_pop.descriptor.fd)) == -1) {
             LOG_ERROR("client={} failed to close socket: {}", to_pop.descriptor.handle, std::strerror(errno));
         }
 
@@ -342,13 +343,13 @@ const std::vector<cl_random_access> &client_manager::assert_consistency() const 
 
     DEBUG_ASSERT_SOA();
 
-    std::unordered_set<detail::valid_fd_t> seen_fds;
+    std::unordered_set<common::valid_fd_t> seen_fds;
     for (size_t i = 0; i < random_access_.size(); i++) {
         const auto &client = random_access_[i];
 
         DEBUG_ASSERT(client.descriptor.handle == i);
 
-        DEBUG_ASSERT(detail::verify_fd(client.descriptor.fd));
+        DEBUG_ASSERT(common::verify_fd(client.descriptor.fd));
         DEBUG_ASSERT(!seen_fds.contains(client.descriptor.fd));
         seen_fds.insert(client.descriptor.fd);
 

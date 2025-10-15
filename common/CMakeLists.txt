@@ -50,25 +50,24 @@ endif()
 # ============================================================================
 # Target
 # ============================================================================
-add_library(soupbin_common INTERFACE)
+add_library(soupbin_common STATIC)
 add_library(soupbin::common ALIAS soupbin_common)
 
+target_sources(soupbin_common
+    PRIVATE
+        src/messages.cpp
+)
+
 target_include_directories(soupbin_common
-    INTERFACE
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
-target_compile_definitions(soupbin_common
-    INTERFACE
-        SOUPBIN_SERVER_HEARTBEAT_SEC=${SOUPBIN_SERVER_HEARTBEAT_SEC}
-        SOUPBIN_CLIENT_HEARTBEAT_SEC=${SOUPBIN_CLIENT_HEARTBEAT_SEC}
-)
-
-target_link_libraries(soupbin_common INTERFACE type_safe)
+target_link_libraries(soupbin_common PUBLIC type_safe)
 if(SOUPBIN_ENABLE_LOGGING)
-    target_link_libraries(soupbin_common INTERFACE spdlog::spdlog)
-    target_compile_definitions(soupbin_common INTERFACE
+    target_link_libraries(soupbin_common PUBLIC spdlog::spdlog)
+    target_compile_definitions(soupbin_common PUBLIC
         SOUPBIN_LOGGING_ENABLED
         SOUPBIN_SOURCE_DIR="${CMAKE_SOURCE_DIR}/"
     )

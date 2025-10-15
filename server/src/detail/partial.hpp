@@ -1,7 +1,7 @@
 #pragma once
 
 #include "detail/config.hpp"
-#include "detail/messages.hpp"
+#include "common/messages.hpp"
 
 #include "common/assert.hpp"
 
@@ -35,22 +35,22 @@ public:
         length_ = static_cast<uint8_t>(length);
 
 #ifndef NDEBUG
-        if (length_ > sizeof(detail::msg_header)) {
-            const auto *header = reinterpret_cast<const detail::msg_header *>(buffer_.data());
+        if (length_ > sizeof(common::msg_header)) {
+            const auto *header = reinterpret_cast<const common::msg_header *>(buffer_.data());
 
             switch (header->type) {
-            case detail::mt_debug:
-            case detail::mt_unsequenced:
-            case detail::mt_logout_request:
-            case detail::mt_login_request:
-            case detail::mt_client_heartbeat:
+            case common::mt_debug:
+            case common::mt_unsequenced:
+            case common::mt_logout_request:
+            case common::mt_login_request:
+            case common::mt_client_heartbeat:
                 break;
 
-            case detail::mt_login_accepted:
-            case detail::mt_login_rejected:
-            case detail::mt_sequenced:
-            case detail::mt_server_heartbeat:
-            case detail::mt_end_of_session:
+            case common::mt_login_accepted:
+            case common::mt_login_rejected:
+            case common::mt_sequenced:
+            case common::mt_server_heartbeat:
+            case common::mt_end_of_session:
                 FUZZ_UNREACHABLE();
                 break;
 

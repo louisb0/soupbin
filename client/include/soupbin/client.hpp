@@ -51,10 +51,9 @@ public:
     void recv(std::span<std::byte>) noexcept;
     [[nodiscard]] bool try_recv(std::span<std::byte>) noexcept;
     [[nodiscard]] bool send(message_type type, std::span<const std::byte> payload) noexcept;
+    bool disconnect() noexcept;
 
-    void disconnect() noexcept;
     [[nodiscard]] bool connected() const noexcept;
-
     [[nodiscard]] const std::string &session_id() const noexcept;
     [[nodiscard]] size_t sequence_num() const noexcept;
 

@@ -5,6 +5,8 @@
 #include <random>
 #include <string>
 
+namespace soupbin::common {
+
 inline std::string generate_alphanumeric(size_t length) {
     static constexpr char charset[] = "0123456789abcdefghijklmnopqrstuvwxyz"; // NOLINT(*-avoid-c-arrays)
 
@@ -16,3 +18,5 @@ inline std::string generate_alphanumeric(size_t length) {
 
     return result;
 }
+
+} // namespace soupbin::common

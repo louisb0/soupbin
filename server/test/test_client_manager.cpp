@@ -1,12 +1,13 @@
 #include <gtest/gtest.h>
 
 #include "detail/client_manager.hpp"
-#include "detail/messages.hpp"
 #include "detail/session.hpp"
 #include "detail/types.hpp"
 
 #include "common/assert.hpp"
 #include "common/log.hpp"
+#include "common/messages.hpp"
+#include "common/types.hpp"
 #include "common/util.hpp"
 
 #include <algorithm>
@@ -35,15 +36,15 @@ class ClientManagerTest : public testing::Test {
 
 protected:
     // NOLINTBEGIN(*-non-private-*)
-    detail::valid_fd_t epoll_{};
-    detail::valid_fd_t listener_{};
+    common::valid_fd_t epoll_{};
+    common::valid_fd_t listener_{};
     uint16_t port_{};
     // NOLINTEND(*-non-private-*)
 
     ClientManagerTest() noexcept {
         int epoll_fd = epoll_create1(0);
         ASSERT(epoll_fd != -1);
-        epoll_ = detail::valid_fd_t(epoll_fd);
+        epoll_ = common::valid_fd_t(epoll_fd);
 
         int listener_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
         ASSERT(listener_fd != -1);
@@ -63,12 +64,12 @@ protected:
         ASSERT(getsockname(listener_fd, reinterpret_cast<sockaddr *>(&addr), &addr_len) == 0);
         port_ = ntohs(addr.sin_port);
 
-        listener_ = detail::valid_fd_t(listener_fd);
+        listener_ = common::valid_fd_t(listener_fd);
     }
 
     ~ClientManagerTest() override {
-        close(detail::ts::get(epoll_));
-        close(detail::ts::get(listener_));
+        close(common::ts::get(epoll_));
+        close(common::ts::get(listener_));
     }
 
     [[nodiscard]] int connect_one() const noexcept {
@@ -145,7 +146,7 @@ TEST_F(ClientManagerTest, Smoke) {
     cmgr.assert_consistency();
 
     // One unauthenticated client with data.
-    drain(detail::ts::get(ctx.all().front()->descriptor.fd));
+    drain(common::ts::get(ctx.all().front()->descriptor.fd));
 
     ctx = cmgr.poll(std::chrono::milliseconds(0));
     EXPECT_EQ(ctx.all().size(), 1);
@@ -198,12 +199,12 @@ TEST_F(ClientManagerTest, Ordering) {
     EXPECT_EQ(ctx.authed().size(), 0);
     EXPECT_EQ(ctx.unauthed().size(), 4);
 
-    detail::session session1(generate_alphanumeric(detail::session_id_len), "s1");
-    session1.subscribe(*ctx.all()[0], detail::seq_num_t(0));
-    session1.subscribe(*ctx.all()[1], detail::seq_num_t(0));
+    detail::session session1(common::generate_alphanumeric(common::msg_session_id_len), "s1");
+    session1.subscribe(*ctx.all()[0], common::seq_num_t(0));
+    session1.subscribe(*ctx.all()[1], common::seq_num_t(0));
 
-    detail::session session2(generate_alphanumeric(detail::session_id_len), "s2");
-    session2.subscribe(*ctx.all()[2], detail::seq_num_t(0));
+    detail::session session2(common::generate_alphanumeric(common::msg_session_id_len), "s2");
+    session2.subscribe(*ctx.all()[2], common::seq_num_t(0));
 
     cmgr.process(ctx);
     cmgr.assert_consistency();
@@ -256,8 +257,8 @@ TEST_F(ClientManagerTest, DropHandleManagement) {
     EXPECT_EQ(ctx.authed().size(), 0);
     EXPECT_EQ(ctx.unauthed().size(), 3);
 
-    detail::session session(generate_alphanumeric(detail::session_id_len), "s1");
-    std::ranges::for_each(ctx.all(), [&session](auto *cl) { session.subscribe(*cl, detail::seq_num_t(0)); });
+    detail::session session(common::generate_alphanumeric(common::msg_session_id_len), "s1");
+    std::ranges::for_each(ctx.all(), [&session](auto *cl) { session.subscribe(*cl, common::seq_num_t(0)); });
 
     cmgr.process(ctx);
     cmgr.assert_consistency();

@@ -4,7 +4,6 @@
 
 #include "detail/client_manager.hpp"
 #include "detail/config.hpp"
-#include "detail/messages.hpp"
 #include "detail/network.hpp"
 #include "detail/partial.hpp"
 #include "detail/session.hpp"
@@ -12,6 +11,8 @@
 
 #include "common/assert.hpp"
 #include "common/log.hpp"
+#include "common/messages.hpp"
+#include "common/types.hpp"
 #include "common/util.hpp"
 
 #include "server.hpp"
@@ -62,11 +63,12 @@ void server::run() noexcept { impl_->run(); }
 // Definitions.
 // ============================================================================
 
-server::impl::impl(detail::valid_fd_t listener, detail::valid_fd_t epoll, server_config &&cfg) noexcept
+server::impl::impl(common::valid_fd_t listener, common::valid_fd_t epoll, server_config &&cfg) noexcept
     : cmgr_(epoll, listener), cfg_(std::move(cfg)) {}
 
 void server::impl::run() noexcept {
     while (true) {
+        // TODO: Consider poll(timeout, [](ctx) { return ctx; }) over poll()-process() pairing.
         detail::cm_batch_context ctx = cmgr_.poll(std::chrono::milliseconds(detail::poll_ms));
 
         batch_unauthed(ctx);
@@ -99,7 +101,7 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
         // ----------------------------------------
         // (1) Receive login message.
         // ----------------------------------------
-        std::array<std::byte, sizeof(detail::msg_login_request)> login_req_buf{};
+        std::array<std::byte, sizeof(common::msg_login_request)> login_req_buf{};
 
         size_t read = client->partial.load(login_req_buf.data());
         if (auto err = detail::recv_all(client->descriptor, login_req_buf.data(), login_req_buf.size(), read)) {
@@ -114,16 +116,16 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
         // ----------------------------------------
         // (2) Validate message structure.
         // ----------------------------------------
-        const auto *request = reinterpret_cast<const detail::msg_login_request *>(login_req_buf.data());
+        const auto *request = reinterpret_cast<const common::msg_login_request *>(login_req_buf.data());
 
-        if (request->hdr.type != detail::mt_login_request) {
+        if (request->hdr.type != common::mt_login_request) {
             ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::proto_malformed_message);
 
             FUZZ_UNREACHABLE();
             continue;
         }
 
-        if (ntohs(request->hdr.length) != sizeof(detail::msg_login_request) - sizeof(detail::msg_header)) {
+        if (ntohs(request->hdr.length) != sizeof(common::msg_login_request) - sizeof(common::msg_header)) {
             ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::proto_malformed_length);
 
             FUZZ_UNREACHABLE();
@@ -133,11 +135,11 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
         // ----------------------------------------
         // (3) Authenticate.
         // ----------------------------------------
-        const auto username = detail::view_right_padded(request->username, detail::username_len);
-        const auto password = detail::view_right_padded(request->password, detail::password_len);
+        const auto username = common::view_right_padded(request->username, common::msg_username_len);
+        const auto password = common::view_right_padded(request->password, common::msg_password_len);
         if (!cfg_.on_auth(username, password)) {
-            static const auto *buf = reinterpret_cast<const std::byte *>(&detail::msg_login_rejected::prebuilt_auth);
-            (void)detail::send_all(client->descriptor, buf, sizeof(detail::msg_login_rejected::prebuilt_auth));
+            static const auto *buf = reinterpret_cast<const std::byte *>(&common::msg_login_rejected::prebuilt_auth);
+            (void)detail::send_all(client->descriptor, buf, sizeof(common::msg_login_rejected::prebuilt_auth));
             ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::bad_credentials);
 
             continue;
@@ -146,18 +148,18 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
         // ----------------------------------------
         // (4) Create or authorise against session.
         // ----------------------------------------
-        const auto req_sequence_num = detail::view_left_padded(request->sequence_num, detail::sequence_num_len);
+        const auto req_sequence_num = common::view_left_padded(request->sequence_num, common::msg_sequence_num_len);
         if (req_sequence_num.empty() || !std::ranges::all_of(req_sequence_num, ::isdigit)) {
             ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::proto_malformed_seqnum);
 
             FUZZ_UNREACHABLE();
             continue;
         }
-        const auto sequence_num = detail::seq_num_t{ std::stoul(std::string(req_sequence_num)) };
+        const auto sequence_num = common::seq_num_t{ std::stoul(std::string(req_sequence_num)) };
 
-        const auto req_session_id = detail::view_left_padded(request->session_id, detail::session_id_len);
+        const auto req_session_id = common::view_left_padded(request->session_id, common::msg_session_id_len);
         const auto session_id =
-            req_session_id.empty() ? generate_alphanumeric(detail::session_id_len) : std::string(req_session_id);
+            req_session_id.empty() ? common::generate_alphanumeric(common::msg_session_id_len) : std::string(req_session_id);
 
         auto [it, inserted] = sessions_.try_emplace(session_id, session_id, std::string(username));
         auto &session = it->second;
@@ -165,8 +167,8 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
         const bool is_existing_session = !inserted;
         const bool is_authorised = session.owned_by(username) && (sequence_num <= session.message_count());
         if (is_existing_session && !is_authorised) {
-            static const auto *buf = reinterpret_cast<const std::byte *>(&detail::msg_login_rejected::prebuilt_session);
-            (void)detail::send_all(client->descriptor, buf, sizeof(detail::msg_login_rejected));
+            static const auto *buf = reinterpret_cast<const std::byte *>(&common::msg_login_rejected::prebuilt_session);
+            (void)detail::send_all(client->descriptor, buf, sizeof(common::msg_login_rejected));
             ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::bad_session);
 
             continue;
@@ -175,8 +177,8 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
         // ----------------------------------------
         // (5) Send login accepted, subscribe to session.
         // ----------------------------------------
-        const auto accept =
-            detail::msg_login_accepted::build(session_id, std::string_view(request->sequence_num, detail::sequence_num_len));
+        const auto accept = common::msg_login_accepted::build(
+            session_id, std::string_view(request->sequence_num, common::msg_sequence_num_len));
         const auto *accept_buf = reinterpret_cast<const std::byte *>(&accept);
 
         if (auto err = detail::send_all(client->descriptor, accept_buf, sizeof(accept))) {
@@ -222,7 +224,7 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
         if (auto err = detail::recv_all(client->descriptor, client_buf, detail::max_pb_client_recv, read)) {
             ctx.mark_drop(client->descriptor.handle, *err);
 
-            if (read < detail::msg_minimum_size) {
+            if (read < common::msg_minimum_size) {
                 continue;
             }
         }
@@ -231,11 +233,11 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
         size_t parsed = 0;
         while (parsed != read) {
             const size_t available = read - parsed;
-            if (available < sizeof(detail::msg_header)) {
+            if (available < sizeof(common::msg_header)) {
                 break;
             }
 
-            const auto *header = reinterpret_cast<const detail::msg_header *>(client_buf + parsed);
+            const auto *header = reinterpret_cast<const common::msg_header *>(client_buf + parsed);
             const size_t payload_length = ntohs(header->length);
             if (payload_length > detail::max_payload_size) {
                 ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::proto_excessive_length);
@@ -244,20 +246,20 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
                 continue;
             }
 
-            const size_t message_length = sizeof(detail::msg_header) + payload_length;
+            const size_t message_length = sizeof(common::msg_header) + payload_length;
             if (available < message_length) {
                 break;
             }
 
             switch (header->type) {
-            case detail::mt_debug:
-            case detail::mt_unsequenced: {
+            case common::mt_debug:
+            case common::mt_unsequenced: {
                 static_assert(std::is_same_v<decltype(detail::max_payload_size), const uint8_t>);
 
-                const auto *payload_start = reinterpret_cast<const std::byte *>(header) + sizeof(detail::msg_header);
+                const auto *payload_start = reinterpret_cast<const std::byte *>(header) + sizeof(common::msg_header);
                 const auto payload_size = static_cast<uint8_t>(payload_length);
                 const auto message_type =
-                    (header->type == detail::mt_debug) ? message_type::debug : message_type::unsequenced;
+                    (header->type == common::mt_debug) ? message_type::debug : message_type::unsequenced;
 
                 message_views[total_view_count++] = { .offset = payload_start, .len = payload_size, .type = message_type };
                 message_view_counts[i]++;
@@ -267,22 +269,22 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
                 break;
             }
 
-            case detail::mt_logout_request: {
+            case common::mt_logout_request: {
                 ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::orderly_logout);
 
                 break;
             }
 
-            case detail::mt_client_heartbeat: {
+            case common::mt_client_heartbeat: {
                 break;
             }
 
-            case detail::mt_login_accepted:
-            case detail::mt_login_rejected:
-            case detail::mt_sequenced:
-            case detail::mt_server_heartbeat:
-            case detail::mt_end_of_session:
-            case detail::mt_login_request: {
+            case common::mt_login_accepted:
+            case common::mt_login_rejected:
+            case common::mt_sequenced:
+            case common::mt_server_heartbeat:
+            case common::mt_end_of_session:
+            case common::mt_login_request: {
                 ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::proto_unexpected_type);
 
                 FUZZ_UNREACHABLE();
@@ -349,15 +351,15 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
             } else {
                 DEBUG_ASSERT(type == message_type::debug || type == message_type::unsequenced);
 
-                const size_t total_message_size = sizeof(detail::msg_header) + payload.size();
+                const size_t total_message_size = sizeof(common::msg_header) + payload.size();
                 DEBUG_ASSERT(reply_buf_offset + total_message_size <= reply_buf.size());
 
                 const size_t header_offset = reply_buf_offset;
-                auto *header = reinterpret_cast<detail::msg_header *>(reply_buf.data() + header_offset);
+                auto *header = reinterpret_cast<common::msg_header *>(reply_buf.data() + header_offset);
                 header->length = htons(static_cast<uint16_t>(payload.size()));
-                header->type = (type == message_type::debug) ? detail::mt_debug : detail::mt_unsequenced;
+                header->type = (type == message_type::debug) ? common::mt_debug : common::mt_unsequenced;
 
-                const size_t payload_offset = header_offset + sizeof(detail::msg_header);
+                const size_t payload_offset = header_offset + sizeof(common::msg_header);
                 std::memcpy(reply_buf.data() + payload_offset, payload.data(), payload.size());
 
                 reply_buf_offset += total_message_size;
@@ -384,16 +386,16 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
         size_t parsed = 0;
         while (parsed != reply_buf_offset) {
             const size_t available = reply_buf_offset - parsed;
-            DEBUG_ASSERT(available >= sizeof(detail::msg_header));
+            DEBUG_ASSERT(available >= sizeof(common::msg_header));
 
-            const auto *header = reinterpret_cast<const detail::msg_header *>(reply_buf.data() + parsed);
-            DEBUG_ASSERT(header->type == detail::mt_debug || header->type == detail::mt_unsequenced);
+            const auto *header = reinterpret_cast<const common::msg_header *>(reply_buf.data() + parsed);
+            DEBUG_ASSERT(header->type == common::mt_debug || header->type == common::mt_unsequenced);
 
             const size_t payload_length = ntohs(header->length);
             DEBUG_ASSERT(payload_length > 0);
             DEBUG_ASSERT(payload_length <= detail::max_payload_size);
 
-            const size_t message_length = sizeof(detail::msg_header) + payload_length;
+            const size_t message_length = sizeof(common::msg_header) + payload_length;
             DEBUG_ASSERT(available >= message_length);
 
             DEBUG_ASSERT(parsed + message_length <= reply_buf_offset);
@@ -523,7 +525,7 @@ std::expected<server, std::error_code> make_server(server_config cfg) {
     }
 
     return server(
-        std::make_unique<server::impl>(detail::valid_fd_t(listener_fd), detail::valid_fd_t(epoll_fd), std::move(cfg)));
+        std::make_unique<server::impl>(common::valid_fd_t(listener_fd), common::valid_fd_t(epoll_fd), std::move(cfg)));
 }
 
 } // namespace soupbin

@@ -2,16 +2,19 @@
 
 #include "soupbin/client.hpp"
 
+#include "common/types.hpp"
+
 #include <cstddef>
-#include <cstdint>
 #include <span>
+#include <stop_token>
 #include <string>
+#include <thread>
 
 namespace soupbin {
 
 class client::impl {
 public:
-    [[nodiscard]] impl() noexcept;
+    [[nodiscard]] impl(std::jthread thread, std::string session_id, common::seq_num_t sequence_num) noexcept;
 
     impl(const impl &) = delete;
     impl &operator=(const impl &) = delete;
@@ -22,16 +25,18 @@ public:
     void recv(std::span<std::byte>) noexcept;
     [[nodiscard]] bool try_recv(std::span<std::byte>) noexcept;
     [[nodiscard]] bool send(message_type type, std::span<const std::byte> payload) noexcept;
+    bool disconnect() noexcept { return thread_.request_stop(); }
 
-    void disconnect() noexcept;
-    [[nodiscard]] bool connected() const noexcept { return false; } // NOLINT
-
+    [[nodiscard]] bool connected() const noexcept { return !thread_.get_stop_token().stop_requested(); }
     [[nodiscard]] const std::string &session_id() const noexcept { return session_id_; }
-    [[nodiscard]] size_t sequence_num() const noexcept { return sequence_num_; };
+    [[nodiscard]] size_t sequence_num() const noexcept { return common::ts::get(sequence_num_); }
 
 private:
+    std::jthread thread_;
+    common::valid_fd_t fd_;
+
     std::string session_id_;
-    uint64_t sequence_num_;
+    common::seq_num_t sequence_num_;
 
     void assert_consistency() const noexcept;
 };

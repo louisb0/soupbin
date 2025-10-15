@@ -2,6 +2,8 @@
 
 #include <spdlog/spdlog.h>
 
+namespace soupbin::common {
+
 #ifdef SOUPBIN_LOGGING_ENABLED
 #ifndef SOUPBIN_SOURCE_DIR
 #error "SOUPBIN_SOURCE_DIR must defined when SOUPBIN_LOGGING_ENABLED is set."
@@ -23,7 +25,7 @@ constexpr const char *strip_source_dir(const char *path) {
 
 #define LOG_IMPL(level, msg, ...)                                                                                           \
     do {                                                                                                                    \
-        spdlog::level("[{}:{}] " msg, strip_source_dir(__FILE__), __LINE__, ##__VA_ARGS__);                                 \
+        spdlog::level("[{}:{}] " msg, common::strip_source_dir(__FILE__), __LINE__, ##__VA_ARGS__);                         \
     } while (0)
 #else
 #define LOG_IMPL(level, msg, ...) ((void)0)
@@ -34,3 +36,5 @@ constexpr const char *strip_source_dir(const char *path) {
 #define LOG_WARN(msg, ...) LOG_IMPL(warn, msg, ##__VA_ARGS__)
 #define LOG_INFO(msg, ...) LOG_IMPL(info, msg, ##__VA_ARGS__)
 #define LOG_DEBUG(msg, ...) LOG_IMPL(debug, msg, ##__VA_ARGS__)
+
+} // namespace soupbin::common

@@ -39,7 +39,6 @@ target_sources(soupbin_server
         src/server.cpp
         src/detail/client_manager.cpp
         src/detail/session.cpp
-        src/detail/messages.cpp
 )
 
 target_include_directories(soupbin_server
