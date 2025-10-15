@@ -58,6 +58,8 @@ void cm_batch_context::mark_drop(detail::client_handle_t handle, drop_reason rea
             return "proto_malformed_message";
         case drop_reason::proto_malformed_length:
             return "proto_malformed_length";
+        case drop_reason::proto_malformed_seqnum:
+            return "proto_malformed_seqnum";
         case drop_reason::proto_malformed_type:
             return "proto_malformed_type";
         case drop_reason::proto_excessive_length:
@@ -257,11 +259,10 @@ void client_manager::process(cm_batch_context &ctx) noexcept {
         }
 
         if (now - last_send >= std::chrono::seconds(detail::server_heartbeat_sec - 1)) {
-            static const auto heartbeat = detail::msg_server_heartbeat::build();
-            static const auto *heartbeat_buf = reinterpret_cast<const std::byte *>(&heartbeat);
+            static const auto *heartbeat_buf = reinterpret_cast<const std::byte *>(&detail::msg_server_heartbeat::prebuilt);
 
             auto &client = random_access_[i];
-            if (auto failed = detail::send_all(client.descriptor, heartbeat_buf, sizeof(heartbeat))) {
+            if (auto failed = detail::send_all(client.descriptor, heartbeat_buf, sizeof(detail::msg_server_heartbeat))) {
                 ctx.mark_drop(client.descriptor.handle, *failed);
                 continue;
             }

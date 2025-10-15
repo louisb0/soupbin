@@ -30,9 +30,11 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_link_options(-fsanitize=address,undefined)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Profile")
     add_compile_options(-g3 -O3 -fno-omit-frame-pointer)
+    add_compile_definitions(NFUZZ)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(-O3)
     add_link_options(-s)
+    add_compile_definitions(NFUZZ)
 endif()
 
 # ============================================================================

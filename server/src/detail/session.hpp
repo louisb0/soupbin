@@ -42,8 +42,8 @@ public:
     void catchup(detail::cm_batch_context &ctx) noexcept;
 
     [[nodiscard]] const std::string &id() const noexcept { return id_; }
-    [[nodiscard]] const std::string &owner() const noexcept { return owner_; }
     [[nodiscard]] detail::seq_num_t message_count() const noexcept { return detail::seq_num_t{ boundaries_.size() }; }
+    [[nodiscard]] bool owned_by(std::string_view username) const noexcept { return owner_ == username; }
     [[nodiscard]] std::vector<sn_subscriber> &subscribers() noexcept { return subscribers_; }
 
     // NOLINTNEXTLINE(modernize-use-nodiscard)

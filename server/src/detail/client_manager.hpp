@@ -48,6 +48,7 @@ public:
         abrupt_disconnect,
         proto_malformed_message,
         proto_malformed_length,
+        proto_malformed_seqnum,
         proto_malformed_type,
         proto_excessive_length,
         proto_unexpected_type,

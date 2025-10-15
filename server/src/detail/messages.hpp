@@ -6,12 +6,6 @@
 
 #include <netinet/in.h>
 
-// TODO:
-//  - Add parsing layer
-//  - Rework build interface
-//  - Add prebuilt static messages (e.g. heartbeats)
-//  - Rework and test formatting functions
-
 namespace soupbin::detail {
 
 // ============================================================================
@@ -61,22 +55,6 @@ struct __attribute__((packed)) msg_login_request {
     char sequence_num[sequence_num_len];
 };
 
-struct __attribute__((packed)) msg_login_rejected {
-    msg_header hdr;
-    reject_code reason;
-
-    [[nodiscard]] static msg_login_rejected build(reject_code reason) {
-        DEBUG_ASSERT(reason == rej_not_authenticated || reason == rej_no_session);
-
-        msg_login_rejected msg{};
-        msg.hdr.length = htons(sizeof(msg) - sizeof(msg.hdr));
-        msg.hdr.type = mt_login_rejected;
-        msg.reason = reason;
-
-        return msg;
-    }
-};
-
 struct __attribute__((packed)) msg_login_accepted {
     msg_header hdr;
     char session_id[session_id_len];
@@ -96,16 +74,18 @@ struct __attribute__((packed)) msg_login_accepted {
     }
 };
 
+struct __attribute__((packed)) msg_login_rejected {
+    msg_header hdr;
+    reject_code reason;
+
+    static const msg_login_rejected prebuilt_auth;
+    static const msg_login_rejected prebuilt_session;
+};
+
 struct __attribute__((packed)) msg_server_heartbeat {
     msg_header hdr;
 
-    [[nodiscard]] static msg_server_heartbeat build() {
-        msg_server_heartbeat msg{};
-        msg.hdr.length = htons(sizeof(msg) - sizeof(msg.hdr));
-        msg.hdr.type = mt_server_heartbeat;
-
-        return msg;
-    }
+    static const msg_server_heartbeat prebuilt;
 };
 
 constexpr size_t msg_minimum_size = sizeof(msg_header);

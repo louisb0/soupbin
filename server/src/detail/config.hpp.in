@@ -20,6 +20,9 @@ inline constexpr uint16_t poll_ms { @SOUPBIN_POLL_MS@ };
 inline constexpr uint16_t max_clients { @SOUPBIN_MAX_CLIENTS@ };
 inline constexpr uint16_t batch_size { @SOUPBIN_BATCH_SIZE@ };
 
+// NOTE: Required due to message header length field.
+static_assert(sizeof(max_payload_size) <= sizeof(uint16_t));
+
 // ============================================================================
 // Per-batch (PB).
 // ============================================================================
@@ -27,6 +30,7 @@ inline constexpr uint16_t max_pb_new_clients { @SOUPBIN_MAX_PB_NEW_CLIENTS@ };
 
 inline constexpr uint16_t max_pb_client_recv { @SOUPBIN_MAX_PB_CLIENT_RECV@ };
 inline constexpr uint16_t max_pb_client_num_data_msg = div_ceil(max_pb_client_recv, sizeof(detail::msg_header) + 1);
+inline constexpr uint32_t max_pb_client_send = static_cast<uint32_t>(detail::max_message_size) * detail::max_pb_client_num_data_msg;
 
 inline constexpr uint64_t max_pb_total_recv = static_cast<uint64_t>(batch_size) * max_pb_client_recv;
 inline constexpr uint64_t max_pb_total_num_data_msg = static_cast<uint64_t>(batch_size) * max_pb_client_num_data_msg;

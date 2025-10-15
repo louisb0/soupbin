@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -41,14 +42,9 @@
 #include <unistd.h>
 
 // TODO:
-//  - Rework message layer (see messages.hpp).
 //  - Revisit logs, transition to structured (https://github.com/gabime/spdlog/issues/1797).
-//  - Revisit comments.
 //  - Reconsider value of strong types (e.g. client_count_t, seq_num_t).
-//  - Reconsider general user API.
-//  - Rework examples.
 //  - Rework pre-commit / devenv.
-//  - Add FUZZ def.
 
 namespace soupbin {
 
@@ -91,7 +87,7 @@ void server::impl::run() noexcept {
 }
 
 void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
-    auto unauthed = ctx.unauthed();
+    const auto unauthed = ctx.unauthed();
     if (unauthed.empty()) {
         return;
     }
@@ -101,14 +97,14 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
     DEBUG_ASSERT(std::ranges::all_of(unauthed, [&ctx](const auto *cl) { return !ctx.dropped(cl->descriptor.handle); }));
 
     for (auto *client : unauthed) {
-        std::array<std::byte, sizeof(detail::msg_login_request)> login_req_buf{};
-
         // ----------------------------------------
         // (1) Receive login message.
         // ----------------------------------------
+        std::array<std::byte, sizeof(detail::msg_login_request)> login_req_buf{};
+
         size_t read = client->partial.load(login_req_buf.data());
-        if (auto failed = detail::recv_all(client->descriptor, login_req_buf.data(), login_req_buf.size(), read)) {
-            ctx.mark_drop(client->descriptor.handle, *failed);
+        if (auto err = detail::recv_all(client->descriptor, login_req_buf.data(), login_req_buf.size(), read)) {
+            ctx.mark_drop(client->descriptor.handle, *err);
         }
 
         if (read != login_req_buf.size()) {
@@ -135,50 +131,46 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
             continue;
         }
 
-        const std::string_view username = detail::view_right_padded(request->username, detail::username_len);
-        const std::string_view password = detail::view_right_padded(request->password, detail::password_len);
-        const std::string_view req_session_id = detail::view_left_padded(request->session_id, detail::session_id_len);
-        const std::string_view sequence_num = detail::view_left_padded(request->sequence_num, detail::sequence_num_len);
-
-        LOG_INFO("client={} requesting login with username='{}' session_id='{}' sequence_num={}", client->descriptor.handle,
-                 username, req_session_id, sequence_num);
-
         // ----------------------------------------
-        // (3) Validate credentials.
+        // (3) Authenticate.
         // ----------------------------------------
+        const auto username = detail::view_right_padded(request->username, detail::username_len);
+        const auto password = detail::view_right_padded(request->password, detail::password_len);
         if (!cfg_.on_auth(username, password)) {
-            static const auto reject = detail::msg_login_rejected::build(detail::rej_not_authenticated);
-            static const auto *reject_buf = reinterpret_cast<const std::byte *>(&reject);
-
-            (void)detail::send_all(client->descriptor, reject_buf, sizeof(reject));
+            static const auto *buf = reinterpret_cast<const std::byte *>(&detail::msg_login_rejected::prebuilt_auth);
+            (void)detail::send_all(client->descriptor, buf, sizeof(detail::msg_login_rejected::prebuilt_auth));
             ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::bad_credentials);
 
             continue;
         }
 
         // ----------------------------------------
-        // (4) Validate or create session.
+        // (4) Create or authorise against session.
         // ----------------------------------------
-        const std::string session_id =
-            !req_session_id.empty() ? std::string(req_session_id) : generate_alphanumeric(detail::session_id_len);
-        const detail::seq_num_t seq_num{ std::stoul(std::string(sequence_num)) };
+        const auto req_sequence_num = detail::view_left_padded(request->sequence_num, detail::sequence_num_len);
+        if (req_sequence_num.empty() || !std::ranges::all_of(req_sequence_num, ::isdigit)) {
+            ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::proto_malformed_seqnum);
+
+            FUZZ_UNREACHABLE();
+            continue;
+        }
+        const auto sequence_num = detail::seq_num_t{ std::stoul(std::string(req_sequence_num)) };
+
+        const auto req_session_id = detail::view_left_padded(request->session_id, detail::session_id_len);
+        const auto session_id =
+            req_session_id.empty() ? generate_alphanumeric(detail::session_id_len) : std::string(req_session_id);
 
         auto [it, inserted] = sessions_.try_emplace(session_id, session_id, std::string(username));
         auto &session = it->second;
 
-        if (!inserted) {
-            bool owns_session = username == session.owner();
-            bool valid_seqnum = seq_num <= session.message_count();
+        const bool is_existing_session = !inserted;
+        const bool is_authorised = session.owned_by(username) && (sequence_num <= session.message_count());
+        if (is_existing_session && !is_authorised) {
+            static const auto *buf = reinterpret_cast<const std::byte *>(&detail::msg_login_rejected::prebuilt_session);
+            (void)detail::send_all(client->descriptor, buf, sizeof(detail::msg_login_rejected));
+            ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::bad_session);
 
-            if (!owns_session || !valid_seqnum) {
-                static const auto reject = detail::msg_login_rejected::build(detail::rej_no_session);
-                static const auto *reject_buf = reinterpret_cast<const std::byte *>(&reject);
-
-                (void)detail::send_all(client->descriptor, reject_buf, sizeof(reject));
-                ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::bad_session);
-
-                continue;
-            }
+            continue;
         }
 
         // ----------------------------------------
@@ -188,20 +180,20 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
             detail::msg_login_accepted::build(session_id, std::string_view(request->sequence_num, detail::sequence_num_len));
         const auto *accept_buf = reinterpret_cast<const std::byte *>(&accept);
 
-        if (auto failed = detail::send_all(client->descriptor, accept_buf, sizeof(accept))) {
-            ctx.mark_drop(client->descriptor.handle, *failed);
+        if (auto err = detail::send_all(client->descriptor, accept_buf, sizeof(accept))) {
+            ctx.mark_drop(client->descriptor.handle, *err);
             continue;
         }
 
         ctx.mark_sent(client->descriptor.handle);
-        session.subscribe(*client, seq_num);
+        session.subscribe(*client, sequence_num);
 
-        LOG_INFO("client={} authenticated and subscribed to session_id={}.", client->descriptor.handle, session_id);
+        LOG_INFO("client={} authenticated with session_id={}.", client->descriptor.handle, session_id);
     }
 }
 
 void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
-    auto authed = ctx.authed();
+    const auto authed = ctx.authed();
     if (authed.empty()) {
         return;
     }
@@ -210,17 +202,17 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
     DEBUG_ASSERT(std::ranges::all_of(authed, [](const auto *cl) { return cl->authed(); }));
 
     alignas(detail::cache_line_size) std::array<std::byte, detail::max_pb_total_recv> recv_buf{};
-    alignas(detail::cache_line_size) std::array<message_descriptor, detail::max_pb_total_num_data_msg> descriptors{};
-    alignas(detail::cache_line_size) std::array<uint16_t, detail::batch_size> client_descriptor_counts{};
 
-    static_assert(std::numeric_limits<decltype(client_descriptor_counts)::value_type>::max() >=
+    alignas(detail::cache_line_size) std::array<message_view, detail::max_pb_total_num_data_msg> message_views{};
+    alignas(detail::cache_line_size) std::array<uint16_t, detail::batch_size> message_view_counts{};
+    static_assert(std::numeric_limits<decltype(message_view_counts)::value_type>::max() >=
                   detail::max_pb_client_num_data_msg);
 
     // ----------------------------------------
-    // (1) Receive data, build descriptors.
+    // (1) Receive data, build message views.
     // ----------------------------------------
     size_t recv_buf_offset = 0;
-    size_t total_descriptor_count = 0;
+    size_t total_view_count = 0;
 
     for (size_t i = 0; i < authed.size(); i++) {
         auto *client = authed[i];
@@ -228,15 +220,15 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
 
         // 1.1 Receive.
         size_t read = client->partial.load(client_buf);
-        if (auto failed = detail::recv_all(client->descriptor, client_buf, detail::max_pb_client_recv, read)) {
-            ctx.mark_drop(client->descriptor.handle, *failed);
+        if (auto err = detail::recv_all(client->descriptor, client_buf, detail::max_pb_client_recv, read)) {
+            ctx.mark_drop(client->descriptor.handle, *err);
 
             if (read < detail::msg_minimum_size) {
                 continue;
             }
         }
 
-        // 1.2 Build message descriptors.
+        // 1.2 Build message views.
         size_t parsed = 0;
         while (parsed != read) {
             const size_t available = read - parsed;
@@ -245,39 +237,40 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
             }
 
             const auto *header = reinterpret_cast<const detail::msg_header *>(client_buf + parsed);
-            const size_t payload_len = ntohs(header->length);
-            if (payload_len > detail::max_payload_size) {
+            const size_t payload_length = ntohs(header->length);
+            if (payload_length > detail::max_payload_size) {
                 ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::proto_excessive_length);
 
                 FUZZ_UNREACHABLE();
                 continue;
             }
 
-            const size_t message_len = sizeof(detail::msg_header) + payload_len;
-            if (available < message_len) {
+            const size_t message_length = sizeof(detail::msg_header) + payload_length;
+            if (available < message_length) {
                 break;
             }
 
             switch (header->type) {
             case detail::mt_debug:
             case detail::mt_unsequenced: {
-                DEBUG_ASSERT(payload_len <= detail::max_payload_size);
                 static_assert(std::is_same_v<decltype(detail::max_payload_size), const uint8_t>);
 
-                descriptors[total_descriptor_count++] = {
-                    .offset = reinterpret_cast<const std::byte *>(header) + sizeof(detail::msg_header),
-                    .len = static_cast<uint8_t>(payload_len),
-                    .type = (header->type == detail::mt_debug) ? message_type::debug : message_type::unsequenced,
-                };
-                client_descriptor_counts[i]++;
+                const auto *payload_start = reinterpret_cast<const std::byte *>(header) + sizeof(detail::msg_header);
+                const auto payload_size = static_cast<uint8_t>(payload_length);
+                const auto message_type =
+                    (header->type == detail::mt_debug) ? message_type::debug : message_type::unsequenced;
 
-                DEBUG_ASSERT(total_descriptor_count <= descriptors.size());
-                DEBUG_ASSERT(client_descriptor_counts[i] <= detail::max_pb_client_num_data_msg);
+                message_views[total_view_count++] = { .offset = payload_start, .len = payload_size, .type = message_type };
+                message_view_counts[i]++;
+
+                DEBUG_ASSERT(total_view_count <= message_views.size());
+                DEBUG_ASSERT(message_view_counts[i] <= detail::max_pb_client_num_data_msg);
                 break;
             }
 
             case detail::mt_logout_request: {
                 ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::orderly_logout);
+
                 break;
             }
 
@@ -305,82 +298,90 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
             }
             }
 
-            DEBUG_ASSERT(parsed + message_len <= read);
-            parsed += message_len;
+            DEBUG_ASSERT(parsed + message_length <= read);
+            parsed += message_length;
         }
 
-        // 1.3 Advance.
         client->partial.store(client_buf + parsed, read - parsed);
 
+        // 1.3 Advance.
         DEBUG_ASSERT(recv_buf_offset + parsed <= recv_buf.size());
         recv_buf_offset += parsed;
     }
+#ifndef NDEBUG
+    for (const auto &msg : std::span(message_views.begin(), total_view_count)) {
+        DEBUG_ASSERT(msg.type == message_type::debug || msg.type == message_type::unsequenced);
+        DEBUG_ASSERT(msg.len <= detail::max_payload_size);
+    }
+#endif
 
     // ----------------------------------------
-    // (2) Return descriptors to user layer.
+    // (2) Return message views to user layer.
     // ----------------------------------------
-    size_t descriptor_offset = 0;
+    size_t message_view_offset = 0;
 
     for (size_t i = 0; i < authed.size(); i++) {
         const auto *client = authed[i];
-        const auto client_descriptor_count = client_descriptor_counts[i];
+        const auto client_view_count = message_view_counts[i];
 
-        // 2.1 Fetch and validate client descriptors.
-        if (client_descriptor_count == 0) {
+        if (client_view_count == 0) {
             continue;
-        }
-        DEBUG_ASSERT(client_descriptor_count <= detail::max_pb_client_num_data_msg);
-
-        const std::span<message_descriptor> client_descriptors = {
-            &descriptors[descriptor_offset],
-            client_descriptor_count,
-        };
-        for (const auto &msg : client_descriptors) {
-            DEBUG_ASSERT(msg.type == message_type::debug || msg.type == message_type::unsequenced);
-            DEBUG_ASSERT(msg.len <= detail::max_payload_size);
         }
 
         // 2.2 Run callback and buffer responses.
-        static constexpr size_t max_pb_client_data_reply =
-            static_cast<size_t>(detail::max_message_size) * detail::max_pb_client_num_data_msg;
-        alignas(detail::cache_line_size) std::array<std::byte, max_pb_client_data_reply> reply_buf{};
+        alignas(detail::cache_line_size) std::array<std::byte, detail::max_pb_client_send> reply_buf{};
         size_t reply_buf_offset = 0;
 
-        cfg_.on_client_msgs(
-            std::string_view(client->session->id()), client_descriptors,
-            [&reply_buf, &reply_buf_offset, &ctx, client](message_type type, std::span<const std::byte> payload) {
-                if (payload.empty()) {
-                    return make_soupbin_error(errc::reply_too_small);
-                }
+        // clang-format off
+        auto handle_reply = [&reply_buf, &reply_buf_offset, &ctx, client](
+            message_type type,
+            std::span<const std::byte> payload
+        ) -> std::error_code {
+            if (payload.empty()) {
+                return make_soupbin_error(errc::reply_too_small);
+            }
 
-                if (payload.size() > detail::max_payload_size) {
-                    return make_soupbin_error(errc::reply_too_large);
-                }
+            if (payload.size() > detail::max_payload_size) {
+                return make_soupbin_error(errc::reply_too_large);
+            }
 
-                if (type == message_type::sequenced) {
-                    client->session->append_seq_msg(payload);
-                } else {
-                    DEBUG_ASSERT(type == message_type::debug || type == message_type::unsequenced);
-                    DEBUG_ASSERT(reply_buf_offset + sizeof(detail::msg_header) + payload.size() <= reply_buf.size());
+            if (type == message_type::sequenced) {
+                client->session->append_seq_msg(payload);
+            } else {
+                DEBUG_ASSERT(type == message_type::debug || type == message_type::unsequenced);
 
-                    const size_t header_offset = reply_buf_offset;
-                    const size_t payload_offset = header_offset + sizeof(detail::msg_header);
+                const size_t total_message_size = sizeof(detail::msg_header) + payload.size();
+                DEBUG_ASSERT(reply_buf_offset + total_message_size <= reply_buf.size());
 
-                    auto *header = reinterpret_cast<detail::msg_header *>(reply_buf.data() + header_offset);
-                    header->length = htons(static_cast<uint16_t>(payload.size()));
-                    header->type = (type == message_type::debug) ? detail::mt_debug : detail::mt_unsequenced;
+                const size_t header_offset = reply_buf_offset;
+                auto *header = reinterpret_cast<detail::msg_header *>(reply_buf.data() + header_offset);
+                header->length = htons(static_cast<uint16_t>(payload.size()));
+                header->type = (type == message_type::debug) ? detail::mt_debug : detail::mt_unsequenced;
 
-                    std::memcpy(reply_buf.data() + payload_offset, payload.data(), payload.size());
+                const size_t payload_offset = header_offset + sizeof(detail::msg_header);
+                std::memcpy(reply_buf.data() + payload_offset, payload.data(), payload.size());
 
-                    reply_buf_offset = payload_offset + payload.size();
-                }
+                reply_buf_offset += total_message_size;
+            }
 
-                ctx.mark_sent(client->descriptor.handle);
-                return std::error_code{};
-            });
+            ctx.mark_sent(client->descriptor.handle);
+            return std::error_code{};
+        };
+        // clang-format on
+
+        const auto session_id = std::string_view(client->session->id());
+        const auto client_messages = std::span{ &message_views[message_view_offset], client_view_count };
+
+        cfg_.on_client_messages(session_id, client_messages, handle_reply);
+
+        // 2.3 Send buffered non-sequenced data.
+        if (auto err = detail::send_all(client->descriptor, reply_buf.data(), reply_buf_offset)) {
+            ctx.mark_drop(client->descriptor.handle, *err);
+        }
+
+        message_view_offset += client_view_count;
 
 #ifndef NDEBUG
-        // TODO: Overkill?
         size_t parsed = 0;
         while (parsed != reply_buf_offset) {
             const size_t available = reply_buf_offset - parsed;
@@ -389,27 +390,19 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
             const auto *header = reinterpret_cast<const detail::msg_header *>(reply_buf.data() + parsed);
             DEBUG_ASSERT(header->type == detail::mt_debug || header->type == detail::mt_unsequenced);
 
-            const size_t payload_len = ntohs(header->length);
-            DEBUG_ASSERT(payload_len != 0);
-            DEBUG_ASSERT(payload_len <= detail::max_payload_size);
+            const size_t payload_length = ntohs(header->length);
+            DEBUG_ASSERT(payload_length > 0);
+            DEBUG_ASSERT(payload_length <= detail::max_payload_size);
 
-            const size_t message_len = sizeof(detail::msg_header) + payload_len;
-            DEBUG_ASSERT(available >= message_len);
+            const size_t message_length = sizeof(detail::msg_header) + payload_length;
+            DEBUG_ASSERT(available >= message_length);
 
-            DEBUG_ASSERT(parsed + message_len <= reply_buf_offset);
-            parsed += message_len;
+            DEBUG_ASSERT(parsed + message_length <= reply_buf_offset);
+            parsed += message_length;
         }
-        DEBUG_ASSERT(parsed == reply_buf_offset);
 #endif
-
-        // 2.3 Send buffered non-sequenced data.
-        if (auto failed = detail::send_all(client->descriptor, reply_buf.data(), reply_buf_offset)) {
-            ctx.mark_drop(client->descriptor.handle, *failed);
-        }
-
-        descriptor_offset += client_descriptor_count;
     }
-    DEBUG_ASSERT(descriptor_offset == total_descriptor_count);
+    DEBUG_ASSERT(message_view_offset == total_view_count);
 }
 
 void server::impl::assert_consistency() const noexcept {

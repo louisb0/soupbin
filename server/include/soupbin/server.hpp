@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -12,7 +13,9 @@
 
 namespace soupbin {
 
-// ------------------ types ------------------
+// ============================================================================
+// Types.
+// ============================================================================
 
 enum class message_type : uint8_t {
     debug,
@@ -20,32 +23,36 @@ enum class message_type : uint8_t {
     sequenced,
 };
 
-struct message_descriptor {
+struct message_view {
     const std::byte *offset;
     uint8_t len;
     message_type type;
 };
 
-// ----------------- config ------------------
+// ============================================================================
+// Config.
+// ============================================================================
 
 using reply_handler = std::function<std::error_code(message_type type, std::span<const std::byte> payload)>;
 
 using auth_handler = std::function<bool(std::string_view username, std::string_view password)>;
-using client_msgs_handler = std::function<void(std::string_view session_id, std::span<message_descriptor> descriptors,
-                                               const reply_handler &on_reply)>;
+using client_messages_handler =
+    std::function<void(std::string_view session_id, std::span<message_view> messages, const reply_handler &on_reply)>;
 using tick_handler = std::function<bool()>;
 
 struct server_config {
     std::string hostname;
     std::string port;
-    uint16_t tick_ms;
+    std::chrono::milliseconds tick;
 
     auth_handler on_auth;
-    client_msgs_handler on_client_msgs;
-    tick_handler on_tick;
+    client_messages_handler on_client_messages;
+    tick_handler on_tick = []() { return true; };
 };
 
-// ----------------- server ------------------
+// ============================================================================
+// Server.
+// ============================================================================
 
 class server {
 public:
