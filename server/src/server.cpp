@@ -22,7 +22,6 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
-#include <format>
 #include <limits>
 #include <memory>
 #include <optional>

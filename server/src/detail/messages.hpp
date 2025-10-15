@@ -3,8 +3,10 @@
 #include "common/assert.hpp"
 
 #include <cstdint>
+#include <cstring>
+#include <string_view>
 
-#include <netinet/in.h>
+#include <arpa/inet.h>
 
 namespace soupbin::detail {
 

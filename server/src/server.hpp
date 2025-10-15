@@ -12,12 +12,6 @@
 namespace soupbin {
 
 class server::impl {
-    detail::valid_fd_t listener_;
-    detail::client_manager cmgr_;
-    std::unordered_map<std::string, detail::session> sessions_;
-
-    server_config cfg_;
-
 public:
     [[nodiscard]] impl(detail::valid_fd_t listener, detail::valid_fd_t epoll, server_config &&cfg) noexcept;
 
@@ -30,6 +24,11 @@ public:
     void run() noexcept;
 
 private:
+    detail::valid_fd_t listener_;
+    detail::client_manager cmgr_;
+    std::unordered_map<std::string, detail::session> sessions_;
+    server_config cfg_;
+
     void batch_unauthed(detail::cm_batch_context &ctx) noexcept;
     void batch_authed(detail::cm_batch_context &ctx) const noexcept;
 
