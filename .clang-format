@@ -20,7 +20,7 @@ IncludeCategories:
   - Regex: '^"common/'
     Priority: 30
 
-  - Regex: '^"server\.hpp"$'
+  - Regex: '^"(client|server)\.hpp"$'
     Priority: 40
 
   - Regex: '^"'
