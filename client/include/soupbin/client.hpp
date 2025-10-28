@@ -15,6 +15,8 @@ namespace soupbin {
 // ============================================================================
 
 enum class message_type : uint8_t {
+    none,
+
     debug,
     unsequenced,
 };
@@ -41,6 +43,8 @@ struct connect_config {
 
 class client {
 public:
+    static std::expected<client, std::error_code> connect(connect_config) noexcept;
+
     client(const client &) = delete;
     client &operator=(const client &) = delete;
     client(client &&) noexcept;
@@ -48,12 +52,14 @@ public:
     ~client() noexcept;
 
     // TODO: What interface if not connected? Exceptions?
-    void recv(std::span<std::byte>) noexcept;
-    [[nodiscard]] bool try_recv(std::span<std::byte>) noexcept;
-    [[nodiscard]] bool send(message_type type, std::span<const std::byte> payload) noexcept;
-    bool disconnect() noexcept;
+    void send(message_type type, std::span<const std::byte>) noexcept;
+    void recv(message_type &type, std::span<std::byte>) noexcept;
+    [[nodiscard]] bool try_send(message_type type, std::span<const std::byte> payload) noexcept;
+    [[nodiscard]] bool try_recv(message_type &type, std::span<std::byte>) noexcept;
 
+    bool disconnect() noexcept;
     [[nodiscard]] bool connected() const noexcept;
+
     [[nodiscard]] const std::string &session_id() const noexcept;
     [[nodiscard]] size_t sequence_num() const noexcept;
 
@@ -62,9 +68,6 @@ private:
     std::unique_ptr<impl> impl_;
 
     [[nodiscard]] explicit client(std::unique_ptr<impl>) noexcept;
-    friend std::expected<client, std::error_code> connect(connect_config);
 };
-
-[[nodiscard]] std::expected<client, std::error_code> connect(connect_config);
 
 } // namespace soupbin

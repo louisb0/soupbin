@@ -1,10 +1,21 @@
 #pragma once
 
+#include "common/messages.hpp"
+
 #include <cstdint>
 
 namespace soupbin::common {
 
-constexpr uint16_t server_heartbeat_sec { @SOUPBIN_SERVER_HEARTBEAT_SEC@ };
-constexpr uint16_t client_heartbeat_sec { @SOUPBIN_CLIENT_HEARTBEAT_SEC@ };
+// TODO: Extract as option - what if we use something like huge pages?
+inline constexpr uint16_t page_size { 4096 };
+inline constexpr uint8_t cache_line_size { 64 };
+inline constexpr uint8_t max_payload_size { 2 * cache_line_size };
+inline constexpr uint8_t max_message_size { sizeof(common::msg_header) + max_payload_size };
+
+inline constexpr uint16_t server_heartbeat_sec { @SOUPBIN_SERVER_HEARTBEAT_SEC@ };
+inline constexpr uint16_t client_heartbeat_sec { @SOUPBIN_CLIENT_HEARTBEAT_SEC@ };
+
+// NOTE: Required due to message header length field.
+static_assert(sizeof(max_payload_size) <= sizeof(uint16_t));
 
 } // namespace soupbin::common

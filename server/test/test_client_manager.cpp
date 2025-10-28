@@ -5,7 +5,6 @@
 #include "detail/types.hpp"
 
 #include "common/assert.hpp"
-#include "common/log.hpp"
 #include "common/messages.hpp"
 #include "common/types.hpp"
 #include "common/util.hpp"
@@ -193,7 +192,6 @@ TEST_F(ClientManagerTest, Ordering) {
     send_bytes(cfd2, 1);
     send_bytes(cfd4, 1);
 
-    LOG_INFO("1");
     auto ctx = cmgr.poll(std::chrono::milliseconds(0));
     EXPECT_EQ(ctx.all().size(), 4);
     EXPECT_EQ(ctx.authed().size(), 0);

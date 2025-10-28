@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 int main() {
-    auto client = soupbin::connect({
+    auto client = soupbin::client::connect({
         .hostname = "localhost",
         .port = "8888",
         .username = "user",
@@ -28,14 +28,15 @@ int main() {
 
     for (int i = 0; i < 5; i++) {           // NOLINT
         std::array<std::byte, 1024> buffer; // NOLINT
+        soupbin::message_type type{};
 
-        while (client->try_recv(buffer)) {
+        while (client->try_recv(type, buffer)) {
             auto content = std::string_view(reinterpret_cast<const char *>(buffer.data()), sizeof(buffer));
             std::cout << "Received: " << content << "\n";
         }
 
         auto msg = std::as_bytes(std::span("Ping!"));
-        if (!client->send(soupbin::message_type::unsequenced, msg)) {
+        if (!client->try_send(soupbin::message_type::unsequenced, msg)) {
             std::cout << "Could not send message\n";
             break;
         }

@@ -65,7 +65,7 @@ target_compile_definitions(soupbin_server
 # ============================================================================
 # Tests
 # ============================================================================
-if(SOUPBIN_BUILD_TESTS)
+if(SOUPBIN_BUILD_UNIT_TESTS)
     add_executable(soupbin_server_tests
         test/test_client_manager.cpp
         test/test_session.cpp

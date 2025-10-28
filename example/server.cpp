@@ -23,7 +23,7 @@ void handle_client_messages(std::string_view session_id, std::span<soupbin::mess
 }
 
 int main() {
-    auto server = soupbin::make_server({
+    auto server = soupbin::server::create({
         .hostname = "localhost",
         .port = "8888",
         .tick = std::chrono::milliseconds(1),

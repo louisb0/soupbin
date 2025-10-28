@@ -8,6 +8,7 @@
 
 #include <arpa/inet.h>
 
+// TODO: alignment
 namespace soupbin::common {
 
 // ============================================================================

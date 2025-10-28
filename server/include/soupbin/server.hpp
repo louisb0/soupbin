@@ -18,6 +18,8 @@ namespace soupbin {
 // ============================================================================
 
 enum class message_type : uint8_t {
+    none,
+
     debug,
     unsequenced,
     sequenced,
@@ -62,6 +64,8 @@ public:
     server &operator=(server &&) noexcept;
     ~server() noexcept;
 
+    static std::expected<server, std::error_code> create(server_config) noexcept;
+
     void run() noexcept;
 
 private:
@@ -69,9 +73,6 @@ private:
     std::unique_ptr<impl> impl_;
 
     [[nodiscard]] explicit server(std::unique_ptr<impl>) noexcept;
-    friend std::expected<server, std::error_code> make_server(server_config);
 };
-
-[[nodiscard]] std::expected<server, std::error_code> make_server(server_config);
 
 } // namespace soupbin

@@ -48,7 +48,7 @@ void session::unsubscribe(detail::cl_random_access &client) noexcept {
 
 void session::append_seq_msg(std::span<const std::byte> payload) noexcept {
     DEBUG_ASSERT(!payload.empty());
-    DEBUG_ASSERT(payload.size() <= detail::max_payload_size);
+    DEBUG_ASSERT(payload.size() <= common::max_payload_size);
     DEBUG_ASSERT(!subscribers_.empty());
 
     const common::msg_header header{
@@ -124,7 +124,7 @@ std::unordered_set<detail::cl_descriptor> session::assert_consistency() const no
         DEBUG_ASSERT(header->type == common::mt_sequenced);
 
         const size_t payload_len = ntohs(header->length);
-        DEBUG_ASSERT(payload_len <= detail::max_payload_size);
+        DEBUG_ASSERT(payload_len <= common::max_payload_size);
 
         const size_t message_len = sizeof(common::msg_header) + payload_len;
         DEBUG_ASSERT(available >= message_len);

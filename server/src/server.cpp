@@ -10,6 +10,7 @@
 #include "detail/types.hpp"
 
 #include "common/assert.hpp"
+#include "common/config.hpp"
 #include "common/log.hpp"
 #include "common/messages.hpp"
 #include "common/types.hpp"
@@ -45,6 +46,9 @@
 //  - Revisit logs, transition to structured (https://github.com/gabime/spdlog/issues/1797).
 //  - Reconsider value of strong types (e.g. client_count_t, seq_num_t).
 //  - Rework pre-commit / devenv.
+//  - cdomment seapartors ott
+//  - pinning / tuning / hugepages
+//  - std::hardware_cosntructive_interace...
 
 namespace soupbin {
 
@@ -202,10 +206,10 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
     DEBUG_ASSERT(authed.size() <= detail::batch_size);
     DEBUG_ASSERT(std::ranges::all_of(authed, [](const auto *cl) { return cl->authed(); }));
 
-    alignas(detail::cache_line_size) std::array<std::byte, detail::max_pb_total_recv> recv_buf{};
+    alignas(common::cache_line_size) std::array<std::byte, detail::max_pb_total_recv> recv_buf{};
 
-    alignas(detail::cache_line_size) std::array<message_view, detail::max_pb_total_num_data_msg> message_views{};
-    alignas(detail::cache_line_size) std::array<uint16_t, detail::batch_size> message_view_counts{};
+    alignas(common::cache_line_size) std::array<message_view, detail::max_pb_total_num_data_msg> message_views{};
+    alignas(common::cache_line_size) std::array<uint16_t, detail::batch_size> message_view_counts{};
     static_assert(std::numeric_limits<decltype(message_view_counts)::value_type>::max() >=
                   detail::max_pb_client_num_data_msg);
 
@@ -239,7 +243,7 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
 
             const auto *header = reinterpret_cast<const common::msg_header *>(client_buf + parsed);
             const size_t payload_length = ntohs(header->length);
-            if (payload_length > detail::max_payload_size) {
+            if (payload_length > common::max_payload_size) {
                 ctx.mark_drop(client->descriptor.handle, detail::cm_batch_context::drop_reason::proto_excessive_length);
 
                 FUZZ_UNREACHABLE();
@@ -254,7 +258,7 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
             switch (header->type) {
             case common::mt_debug:
             case common::mt_unsequenced: {
-                static_assert(std::is_same_v<decltype(detail::max_payload_size), const uint8_t>);
+                static_assert(std::is_same_v<decltype(common::max_payload_size), const uint8_t>);
 
                 const auto *payload_start = reinterpret_cast<const std::byte *>(header) + sizeof(common::msg_header);
                 const auto payload_size = static_cast<uint8_t>(payload_length);
@@ -312,7 +316,7 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
 #ifndef NDEBUG
     for (const auto &msg : std::span(message_views.begin(), total_view_count)) {
         DEBUG_ASSERT(msg.type == message_type::debug || msg.type == message_type::unsequenced);
-        DEBUG_ASSERT(msg.len <= detail::max_payload_size);
+        DEBUG_ASSERT(msg.len <= common::max_payload_size);
     }
 #endif
 
@@ -330,7 +334,7 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
         }
 
         // 2.2 Run callback and buffer responses.
-        alignas(detail::cache_line_size) std::array<std::byte, detail::max_pb_client_send> reply_buf{};
+        alignas(common::cache_line_size) std::array<std::byte, detail::max_pb_client_send> reply_buf{};
         size_t reply_buf_offset = 0;
 
         // clang-format off
@@ -342,7 +346,7 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
                 return make_soupbin_error(errc::reply_too_small);
             }
 
-            if (payload.size() > detail::max_payload_size) {
+            if (payload.size() > common::max_payload_size) {
                 return make_soupbin_error(errc::reply_too_large);
             }
 
@@ -393,7 +397,7 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
 
             const size_t payload_length = ntohs(header->length);
             DEBUG_ASSERT(payload_length > 0);
-            DEBUG_ASSERT(payload_length <= detail::max_payload_size);
+            DEBUG_ASSERT(payload_length <= common::max_payload_size);
 
             const size_t message_length = sizeof(common::msg_header) + payload_length;
             DEBUG_ASSERT(available >= message_length);
@@ -448,7 +452,8 @@ void server::impl::assert_consistency() const noexcept {
 // Factory.
 // ============================================================================
 
-std::expected<server, std::error_code> make_server(server_config cfg) {
+// TODO: logs
+std::expected<server, std::error_code> server::create(server_config cfg) noexcept {
     if (cfg.hostname.empty()) {
         return std::unexpected(make_soupbin_error(errc::setup_hostname_format));
     }
@@ -524,8 +529,7 @@ std::expected<server, std::error_code> make_server(server_config cfg) {
         return std::unexpected(std::error_code(saved_errno, std::system_category()));
     }
 
-    return server(
-        std::make_unique<server::impl>(common::valid_fd_t(listener_fd), common::valid_fd_t(epoll_fd), std::move(cfg)));
+    return server(std::make_unique<impl>(common::valid_fd_t(listener_fd), common::valid_fd_t(epoll_fd), std::move(cfg)));
 }
 
 } // namespace soupbin
