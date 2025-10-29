@@ -8,6 +8,7 @@ target_sources(soupbin_client
     PRIVATE
         src/client.cpp
         src/detail/spsc_ringbuf.cpp
+        src/detail/event_loop.cpp
 )
 
 target_include_directories(soupbin_client

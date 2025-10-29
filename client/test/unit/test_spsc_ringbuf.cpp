@@ -4,14 +4,20 @@
 
 #include "common/config.hpp"
 
-#include <algorithm>
 #include <cstdlib>
+#include <expected>
+#include <memory>
+#include <new>
+#include <span>
+#include <string>
+#include <utility>
 
 using namespace soupbin;
 
 TEST(SPSCRingbufTest, Smoke) {
-    auto spsc = detail::spsc_ringbuf::create(common::page_size);
-    ASSERT_TRUE(spsc.has_value());
+    auto expected_spsc = detail::spsc_ringbuf::create(common::page_size);
+    ASSERT_TRUE(expected_spsc.has_value());
+    auto spsc = std::move(*expected_spsc);
 
     // Initial conditions.
     ASSERT_TRUE(spsc->read_try_prepare().empty());

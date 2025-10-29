@@ -471,7 +471,7 @@ std::expected<server, std::error_code> server::create(server_config cfg) noexcep
     int gai_c = getaddrinfo(cfg.hostname.c_str(), cfg.port.c_str(), &hints, &res);
     if (gai_c != 0) {
         const char *err = (gai_c == EAI_SYSTEM) ? std::strerror(errno) : gai_strerror(gai_c);
-        LOG_CRITICAL("getaddrinfo() failed (likely due to user error): {}.", err);
+        LOG_CRITICAL("failed to resolve address", err);
 
         if (gai_c == EAI_SYSTEM) {
             return std::unexpected(std::error_code(errno, std::system_category()));
@@ -522,11 +522,10 @@ std::expected<server, std::error_code> server::create(server_config cfg) noexcep
     // Create epoll instance and server.
     int epoll_fd = epoll_create1(0);
     if (epoll_fd == -1) {
-        LOG_CRITICAL("epoll_create1() failed unexpectedly: {}.", std::strerror(errno));
+        LOG_CRITICAL("failed to create epoll instance");
 
-        int saved_errno = errno;
-        close(listener_fd);
-        return std::unexpected(std::error_code(saved_errno, std::system_category()));
+        common::preserving_close(listener_fd);
+        return std::unexpected(std::error_code(errno, std::system_category()));
     }
 
     return server(std::make_unique<impl>(common::valid_fd_t(listener_fd), common::valid_fd_t(epoll_fd), std::move(cfg)));

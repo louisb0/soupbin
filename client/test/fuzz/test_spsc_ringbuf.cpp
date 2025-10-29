@@ -4,9 +4,14 @@
 #include "common/config.hpp"
 #include "common/log.hpp"
 
+#include <atomic>
 #include <chrono>
-#include <numeric>
+#include <cstddef>
+#include <expected>
+#include <memory>
+#include <span>
 #include <thread>
+#include <utility>
 
 using namespace soupbin;
 
@@ -14,8 +19,10 @@ constexpr size_t n = 10000000;
 
 int main() {
     static_assert(n / common::page_size >= 1000); // NOLINT
-    auto spsc = detail::spsc_ringbuf::create(common::page_size);
-    ASSERT(spsc.has_value());
+
+    auto expected_spsc = detail::spsc_ringbuf::create(common::page_size);
+    ASSERT(expected_spsc.has_value());
+    auto spsc = std::move(*expected_spsc);
 
     std::atomic<bool> flag{ false };
     std::jthread producer([&] {

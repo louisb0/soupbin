@@ -1,20 +1,20 @@
 #pragma once
 
 #include "common/config.hpp"
-#include "common/messages.hpp"
-#include "common/types.hpp"
 
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <expected>
+#include <memory>
+#include <span>
+#include <system_error>
 
 namespace soupbin::detail {
 
 class spsc_ringbuf {
 public:
-    static std::expected<spsc_ringbuf, std::error_code> create(size_t capacity) noexcept;
-    [[nodiscard]] explicit spsc_ringbuf(std::byte *base, size_t capacity) noexcept; // TODO: public?
+    static std::expected<std::unique_ptr<spsc_ringbuf>, std::error_code> create(size_t capacity) noexcept;
+    [[nodiscard]] spsc_ringbuf(std::byte *base, size_t capacity) noexcept;
 
     spsc_ringbuf(const spsc_ringbuf &) = delete;
     spsc_ringbuf &operator=(const spsc_ringbuf &) = delete;

@@ -5,6 +5,8 @@
 #include <random>
 #include <string>
 
+#include <unistd.h>
+
 namespace soupbin::common {
 
 inline std::string generate_alphanumeric(size_t length) {
@@ -17,6 +19,12 @@ inline std::string generate_alphanumeric(size_t length) {
     std::generate_n(result.begin(), length, [&]() { return charset[dis(gen)]; });
 
     return result;
+}
+
+inline void preserving_close(int fd) noexcept {
+    int saved = errno;
+    close(fd);
+    errno = saved;
 }
 
 } // namespace soupbin::common

@@ -2,44 +2,45 @@
 
 #include "common/assert.hpp"
 #include "common/config.hpp"
-#include "common/messages.hpp"
+#include "common/log.hpp"
+#include "common/util.hpp"
 
 #include <atomic>
+#include <cerrno>
 #include <cstddef>
-#include <cstdint>
+#include <cstring>
 #include <expected>
+#include <memory>
 
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 namespace soupbin::detail {
 
-std::expected<spsc_ringbuf, std::error_code> spsc_ringbuf::create(size_t capacity) noexcept {
+std::expected<std::unique_ptr<spsc_ringbuf>, std::error_code> spsc_ringbuf::create(size_t capacity) noexcept {
     ASSERT(capacity >= common::max_message_size);
     ASSERT(capacity % common::page_size == 0);
     static_assert(common::page_size % 2 == 0);
+    static_assert(common::max_message_size <= common::page_size);
 
-    // Create identifying file descriptor.
     int fd = memfd_create("spsc_ringbuf", 0);
     if (fd == -1) {
         return std::unexpected(std::error_code(errno, std::system_category()));
     }
 
     if (ftruncate(fd, static_cast<off_t>(capacity)) != 0) {
-        int saved_errno = errno;
-        close(fd);
-        return std::unexpected(std::error_code(saved_errno, std::system_category()));
+        common::preserving_close(fd);
+        return std::unexpected(std::error_code(errno, std::system_category()));
     }
 
-    // Map contiguous region.
-    const size_t total_size = capacity * 2;
+    const size_t total_size = capacity + common::page_size;
     void *region = mmap(nullptr, total_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
     if (region == MAP_FAILED) {
-        int saved_errno = errno;
-        close(fd);
-        return std::unexpected(std::error_code(saved_errno, std::system_category()));
+        common::preserving_close(fd);
+        return std::unexpected(std::error_code(errno, std::system_category()));
     }
 
-    // Map primary and mirror sub-regions.
     void *primary = mmap(region, capacity, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
     if (primary == MAP_FAILED) {
         int saved_errno = errno;
@@ -48,8 +49,8 @@ std::expected<spsc_ringbuf, std::error_code> spsc_ringbuf::create(size_t capacit
         return std::unexpected(std::error_code(saved_errno, std::system_category()));
     }
 
-    void *mirror =
-        mmap(static_cast<std::byte *>(region) + capacity, capacity, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
+    std::byte *primary_end = static_cast<std::byte *>(primary) + capacity;
+    void *mirror = mmap(primary_end, common::page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
     if (mirror == MAP_FAILED) {
         int saved_errno = errno;
         munmap(region, total_size);
@@ -58,8 +59,7 @@ std::expected<spsc_ringbuf, std::error_code> spsc_ringbuf::create(size_t capacit
     }
 
     close(fd);
-
-    return std::expected<spsc_ringbuf, std::error_code>(std::in_place, static_cast<std::byte *>(primary), capacity);
+    return std::make_unique<spsc_ringbuf>(static_cast<std::byte *>(primary), capacity);
 }
 
 spsc_ringbuf::spsc_ringbuf(std::byte *base, size_t capacity) noexcept : base_(base), capacity_(capacity) {

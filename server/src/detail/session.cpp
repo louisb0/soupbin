@@ -1,11 +1,11 @@
 #include "detail/session.hpp"
 
 #include "detail/client_manager.hpp"
-#include "detail/config.hpp"
 #include "detail/network.hpp"
 #include "detail/types.hpp"
 
 #include "common/assert.hpp"
+#include "common/config.hpp"
 #include "common/messages.hpp"
 #include "common/verify.hpp"
 

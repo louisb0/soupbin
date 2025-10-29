@@ -7,9 +7,53 @@
 #include <string_view>
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
 
 // TODO: alignment
 namespace soupbin::common {
+
+// ============================================================================
+// Formatting.
+// ============================================================================
+inline void pad_field_left(char *dst, size_t width, std::string_view src) {
+    ASSERT(src.size() <= width);
+
+    std::fill_n(dst, width, ' ');
+    std::ranges::copy(src, (dst + width) - src.size());
+}
+
+inline void pad_field_right(char *dst, size_t width, std::string_view src) {
+    ASSERT(src.size() <= width);
+
+    std::fill_n(dst, width, ' ');
+    std::ranges::copy(src, dst);
+}
+
+[[nodiscard]] inline std::string_view view_right_padded(const char *field, size_t len) {
+    DEBUG_ASSERT(field != nullptr);
+
+    auto view = std::string_view(field, len);
+    auto end = view.find_last_not_of(' ');
+
+    if (end == std::string_view::npos) {
+        return std::string_view{};
+    }
+
+    return view.substr(0, end + 1);
+}
+
+[[nodiscard]] inline std::string_view view_left_padded(const char *field, size_t len) {
+    DEBUG_ASSERT(field != nullptr);
+
+    auto view = std::string_view(field, len);
+    size_t start = view.find_first_not_of(' ');
+
+    if (start == std::string_view::npos) {
+        return std::string_view{};
+    }
+
+    return view.substr(start);
+}
 
 // ============================================================================
 // Types.
@@ -56,6 +100,31 @@ struct __attribute__((packed)) msg_login_request {
     char password[msg_password_len];
     char session_id[msg_session_id_len];
     char sequence_num[msg_sequence_num_len];
+
+    [[nodiscard]] static msg_login_request build(std::string_view username, std::string_view password,
+                                                 std::string_view session_id, std::string_view sequence_num) {
+        DEBUG_ASSERT(!username.empty());
+        DEBUG_ASSERT(username.length() <= msg_username_len);
+        DEBUG_ASSERT(!password.empty());
+        DEBUG_ASSERT(password.length() <= msg_password_len);
+        DEBUG_ASSERT(!session_id.empty());
+        DEBUG_ASSERT(session_id.length() <= msg_session_id_len);
+        DEBUG_ASSERT(!sequence_num.empty());
+        DEBUG_ASSERT(sequence_num.length() <= msg_sequence_num_len);
+
+        msg_login_request msg{};
+        msg.hdr.length = htons(sizeof(msg) - sizeof(msg.hdr));
+        msg.hdr.type = mt_login_request;
+
+        // NOLINTBEGIN(bugprone-suspicious-stringview-data-usage)
+        pad_field_right(msg.username, msg_username_len, username.data());
+        pad_field_right(msg.password, msg_password_len, password.data());
+        pad_field_left(msg.session_id, msg_session_id_len, session_id.data());
+        pad_field_left(msg.sequence_num, msg_sequence_num_len, sequence_num.data());
+        // NOLINTEND(bugprone-suspicious-stringview-data-usage)
+
+        return msg;
+    }
 };
 
 struct __attribute__((packed)) msg_login_accepted {
@@ -94,34 +163,5 @@ struct __attribute__((packed)) msg_server_heartbeat {
 constexpr size_t msg_minimum_size = sizeof(msg_header);
 
 // NOLINTEND(*-c-arrays)
-// ============================================================================
-// Formatting.
-// ============================================================================
-
-[[nodiscard]] inline std::string_view view_right_padded(const char *field, size_t len) {
-    DEBUG_ASSERT(field != nullptr);
-
-    auto view = std::string_view(field, len);
-    auto end = view.find_last_not_of(' ');
-
-    if (end == std::string_view::npos) {
-        return std::string_view{};
-    }
-
-    return view.substr(0, end + 1);
-}
-
-[[nodiscard]] inline std::string_view view_left_padded(const char *field, size_t len) {
-    DEBUG_ASSERT(field != nullptr);
-
-    auto view = std::string_view(field, len);
-    size_t start = view.find_first_not_of(' ');
-
-    if (start == std::string_view::npos) {
-        return std::string_view{};
-    }
-
-    return view.substr(start);
-}
 
 } // namespace soupbin::common

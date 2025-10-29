@@ -43,7 +43,7 @@ struct connect_config {
 
 class client {
 public:
-    static std::expected<client, std::error_code> connect(connect_config) noexcept;
+    static std::expected<client, std::error_code> connect(const connect_config &) noexcept;
 
     client(const client &) = delete;
     client &operator=(const client &) = delete;
