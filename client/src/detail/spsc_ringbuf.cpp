@@ -73,7 +73,7 @@ spsc_ringbuf::~spsc_ringbuf() noexcept {
         LOG_ERROR("failed to unmap primary buffer: {}", std::strerror(errno));
     }
 
-    if (munmap(mirror(), capacity_) == -1) {
+    if (munmap(mirror(), common::page_size) == -1) {
         LOG_ERROR("failed to unmap mirrored buffer: {}", std::strerror(errno));
     }
 }

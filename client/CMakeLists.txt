@@ -1,4 +1,16 @@
 # ============================================================================
+# Options
+# ============================================================================
+set(SOUPBIN_MAX_SEND_QUEUE      1048576 CACHE STRING "Maximum send queue size in bytes")
+set(SOUPBIN_MAX_RECV_QUEUE      1048576 CACHE STRING "Maximum recv queue size in bytes")
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/detail/config.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/detail/config.hpp
+    @ONLY
+)
+
+# ============================================================================
 # Target
 # ============================================================================
 add_library(soupbin_client STATIC)
@@ -16,6 +28,7 @@ target_include_directories(soupbin_client
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
 target_link_libraries(soupbin_client

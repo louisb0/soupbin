@@ -4,18 +4,6 @@
 set(SOUPBIN_CLIENT_HEARTBEAT_SEC 5  CACHE STRING "Client heartbeat interval in seconds")
 set(SOUPBIN_SERVER_HEARTBEAT_SEC 15 CACHE STRING "Server heartbeat interval in seconds")
 
-function(validate_uint8 var)
-    if(NOT ${var} MATCHES "^[0-9]+$")
-        message(FATAL_ERROR "${var} must be a positive integer")
-    endif()
-    if(${var} LESS 1 OR ${var} GREATER 65535)
-        message(FATAL_ERROR "${var} must be between 1 and 255 (got ${${var}})")
-    endif()
-endfunction()
-
-validate_uint8(SOUPBIN_SERVER_HEARTBEAT_SEC)
-validate_uint8(SOUPBIN_CLIENT_HEARTBEAT_SEC)
-
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/common/config.hpp.in
     ${CMAKE_CURRENT_BINARY_DIR}/generated/common/config.hpp

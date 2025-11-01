@@ -154,6 +154,12 @@ struct __attribute__((packed)) msg_login_rejected {
     static const msg_login_rejected prebuilt_session;
 };
 
+struct __attribute__((packed)) msg_logout_request {
+    msg_header hdr;
+
+    static const msg_logout_request prebuilt;
+};
+
 struct __attribute__((packed)) msg_server_heartbeat {
     msg_header hdr;
 

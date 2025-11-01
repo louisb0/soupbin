@@ -22,10 +22,12 @@ enum class errc : uint8_t {
     setup_password_format,
     setup_session_id_format,
     setup_sequence_num_format,
-    payload_too_small,
-    payload_too_large,
     no_such_login,
     no_such_session,
+    payload_too_small,
+    payload_too_large,
+    buffer_too_small,
+    invalid_message_type,
     protocol,
 
     first_ = setup_hostname_format,
@@ -54,16 +56,20 @@ struct soupbin_category_t final : std::error_category {
             return "session_id was empty or exceeded maximum length";
         case errc::setup_sequence_num_format:
             return "sequence_num was empty or exceeded maximum length";
-        case errc::payload_too_small:
-            return "payload is empty";
-        case errc::payload_too_large:
-            return "payload exceeded upper bound";
         case errc::no_such_login:
             return "login was rejected due to invalid credentials";
         case errc::no_such_session:
             return "login was rejected due to invalid session";
+        case errc::payload_too_small:
+            return "payload is empty";
+        case errc::payload_too_large:
+            return "payload exceeded upper bound";
+        case errc::buffer_too_small:
+            return "buffer does not have enough space for the maximum message size";
+        case errc::invalid_message_type:
+            return "an invalid message type was provided";
         case errc::protocol:
-            return "unexpected message type received";
+            return "a protocol violation occured";
         default:
             return "unknown";
         }

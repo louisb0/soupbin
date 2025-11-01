@@ -30,15 +30,20 @@ int main() {
         std::array<std::byte, 1024> buffer; // NOLINT
         soupbin::message_type type{};
 
-        while (client->try_recv(type, buffer)) {
-            auto content = std::string_view(reinterpret_cast<const char *>(buffer.data()), sizeof(buffer));
-            std::cout << "Received: " << content << "\n";
+        auto msg = std::as_bytes(std::span("Ping!"));
+        if (auto err = client->try_send(soupbin::message_type::unsequenced, msg)) {
+            std::cout << "Could not send message - [" << err->category().name() << "]: " << err->message() << '\n';
+            break;
         }
 
-        auto msg = std::as_bytes(std::span("Ping!"));
-        if (!client->try_send(soupbin::message_type::unsequenced, msg)) {
-            std::cout << "Could not send message\n";
+        size_t received = 0;
+        if (auto err = client->try_recv(type, buffer, received)) {
+            std::cout << "Could not receive message - [" << err->category().name() << "]: " << err->message() << '\n';
             break;
+        }
+        if (received > 0) {
+            auto content = std::string_view(reinterpret_cast<const char *>(buffer.data()), sizeof(buffer));
+            std::cout << "Received: " << content << "\n";
         }
 
         sleep(1);

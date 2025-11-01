@@ -18,8 +18,8 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Profile" "Release"
 option(SOUPBIN_BUILD_EXAMPLES "Build example programs" ON)
 option(SOUPBIN_ENABLE_LOGGING "Enable logging support" ON)
 option(SOUPBIN_BUILD_TESTS "Build tests" ON)
-option(SOUPBIN_ENABLE_TSAN "Enable Thread Sanitizer" OFF)
-option(SOUPBIN_ENABLE_ASAN "Enable Address Sanitizer" ON)
+option(SOUPBIN_ENABLE_TSAN "Enable Thread Sanitizer (debug only)" OFF)
+option(SOUPBIN_ENABLE_ASAN "Enable Address Sanitizer (debug only)" ON)
 
 message(STATUS "========================================")
 message(STATUS "Build examples:     ${SOUPBIN_BUILD_EXAMPLES}")
