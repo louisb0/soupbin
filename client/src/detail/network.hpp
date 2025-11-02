@@ -1,10 +1,10 @@
 #pragma once
 
-#include "detail/client_manager.hpp"
-#include "detail/types.hpp"
+#include "soupbin/client.hpp"
 
 #include "common/assert.hpp"
 #include "common/log.hpp"
+#include "common/types.hpp"
 
 #include <cerrno>
 #include <cstddef>
@@ -14,14 +14,14 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+// TODO: Duplication with server.
 namespace soupbin::detail {
 
-// TODO: Take fd instead of descriptor
-[[nodiscard]] inline std::optional<detail::cm_batch_context::drop_reason>
-send_all(const detail::cl_descriptor &descriptor, const std::byte *buf, size_t len) noexcept {
+[[nodiscard]] inline std::optional<disconnect_reason> send_all(common::valid_fd_t fd, const std::byte *buf,
+                                                               size_t len) noexcept {
     size_t sent = 0;
     while (sent < len) {
-        const ssize_t n = send(common::ts::get(descriptor.fd), buf + sent, len - sent, MSG_NOSIGNAL);
+        const ssize_t n = send(common::ts::get(fd), buf + sent, len - sent, MSG_NOSIGNAL);
 
         if (n == -1) {
             if (errno == EINTR) {
@@ -29,7 +29,7 @@ send_all(const detail::cl_descriptor &descriptor, const std::byte *buf, size_t l
             }
 
             if (errno == ECONNRESET || errno == EPIPE) {
-                return detail::cm_batch_context::drop_reason::abrupt_disconnect;
+                return disconnect_reason::abrupt_tcp_disconnect;
             }
 
             if (errno == ENOMEM || errno == ENOBUFS) {
@@ -46,10 +46,10 @@ send_all(const detail::cl_descriptor &descriptor, const std::byte *buf, size_t l
     return std::nullopt;
 }
 
-[[nodiscard]] inline std::optional<detail::cm_batch_context::drop_reason>
-recv_all(const detail::cl_descriptor &descriptor, std::byte *buf, size_t len, size_t &read) noexcept {
+[[nodiscard]] inline std::optional<disconnect_reason> recv_all(common::valid_fd_t fd, std::byte *buf, size_t len,
+                                                               size_t &read) noexcept {
     while (read < len) {
-        const ssize_t n = recv(common::ts::get(descriptor.fd), buf + read, len - read, MSG_DONTWAIT);
+        const ssize_t n = recv(common::ts::get(fd), buf + read, len - read, MSG_DONTWAIT);
 
         if (n == -1) {
             if (errno == EINTR) {
@@ -61,7 +61,7 @@ recv_all(const detail::cl_descriptor &descriptor, std::byte *buf, size_t len, si
             }
 
             if (errno == ECONNRESET) {
-                return detail::cm_batch_context::drop_reason::abrupt_disconnect;
+                return disconnect_reason::abrupt_tcp_disconnect;
             }
 
             if (errno == ENOMEM || errno == ENOBUFS) {
@@ -72,7 +72,7 @@ recv_all(const detail::cl_descriptor &descriptor, std::byte *buf, size_t len, si
         }
 
         if (n == 0) {
-            return detail::cm_batch_context::drop_reason::graceful_disconnect;
+            return disconnect_reason::orderly_tcp_disconnect;
         }
 
         DEBUG_ASSERT(n > 0);

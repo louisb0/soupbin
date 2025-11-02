@@ -5,7 +5,6 @@
 #include "detail/client_manager.hpp"
 #include "detail/config.hpp"
 #include "detail/network.hpp"
-#include "detail/partial.hpp"
 #include "detail/session.hpp"
 #include "detail/types.hpp"
 
@@ -13,6 +12,7 @@
 #include "common/config.hpp"
 #include "common/log.hpp"
 #include "common/messages.hpp"
+#include "common/partial.hpp"
 #include "common/types.hpp"
 #include "common/util.hpp"
 
@@ -72,7 +72,6 @@ server::impl::impl(common::valid_fd_t listener, common::valid_fd_t epoll, server
 
 void server::impl::run() noexcept {
     while (true) {
-        // TODO: Consider poll(timeout, [](ctx) { return ctx; }) over poll()-process() pairing.
         detail::cm_batch_context ctx = cmgr_.poll(std::chrono::milliseconds(detail::poll_ms));
 
         batch_unauthed(ctx);
@@ -113,7 +112,7 @@ void server::impl::batch_unauthed(detail::cm_batch_context &ctx) noexcept {
         }
 
         if (read != login_req_buf.size()) {
-            client->partial.store(login_req_buf.data(), read);
+            client->partial.store(login_req_buf.data(), read, common::partial::server_tag{});
             continue;
         }
 
@@ -307,7 +306,7 @@ void server::impl::batch_authed(detail::cm_batch_context &ctx) const noexcept {
             parsed += message_length;
         }
 
-        client->partial.store(client_buf + parsed, read - parsed);
+        client->partial.store(client_buf + parsed, read - parsed, common::partial::server_tag{});
 
         // 1.3 Advance.
         DEBUG_ASSERT(recv_buf_offset + parsed <= recv_buf.size());

@@ -166,6 +166,12 @@ struct __attribute__((packed)) msg_server_heartbeat {
     static const msg_server_heartbeat prebuilt;
 };
 
+struct __attribute__((packed)) msg_client_heartbeat {
+    msg_header hdr;
+
+    static const msg_client_heartbeat prebuilt;
+};
+
 constexpr size_t msg_minimum_size = sizeof(msg_header);
 
 // NOLINTEND(*-c-arrays)

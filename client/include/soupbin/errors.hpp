@@ -28,6 +28,7 @@ enum class errc : uint8_t {
     payload_too_large,
     buffer_too_small,
     invalid_message_type,
+    disconnected,
     protocol,
 
     first_ = setup_hostname_format,
@@ -68,6 +69,8 @@ struct soupbin_category_t final : std::error_category {
             return "buffer does not have enough space for the maximum message size";
         case errc::invalid_message_type:
             return "an invalid message type was provided";
+        case errc::disconnected:
+            return "client is diconnected";
         case errc::protocol:
             return "a protocol violation occured";
         default:
@@ -82,6 +85,10 @@ inline const std::error_category &soupbin_category() noexcept {
 }
 
 inline std::error_code make_soupbin_error(errc e) noexcept { return { static_cast<int>(e), soupbin_category() }; }
+
+inline bool operator==(const std::error_code &ec, errc e) noexcept {
+    return ec.category() == soupbin_category() && ec.value() == static_cast<int>(e);
+}
 
 // ============================================================================
 // getaddrinfo() errors.

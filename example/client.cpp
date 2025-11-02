@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdlib>
+#include <expected>
 #include <iostream>
 #include <span>
 #include <string_view>
@@ -48,8 +49,6 @@ int main() {
 
         sleep(1);
     }
-
-    client->disconnect();
 
     std::cout << "Press Enter to exit...";
     std::cin.get();

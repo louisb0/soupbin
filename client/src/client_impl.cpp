@@ -1,6 +1,6 @@
+#include "client_impl.hpp"
 
 #include "soupbin/client.hpp"
-
 #include "soupbin/errors.hpp"
 
 #include "detail/config.hpp"
@@ -12,14 +12,12 @@
 #include "common/messages.hpp"
 #include "common/util.hpp"
 
-#include "client.hpp"
-
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <expected>
 #include <memory>
 #include <optional>
-#include <stop_token>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -34,13 +32,74 @@
 namespace soupbin {
 
 // ============================================================================
-// Helpers.
+// Forwarding.
 // ============================================================================
-static std::error_code validate_send(message_type type, std::span<const std::byte> payload) {
+client::client(std::unique_ptr<impl> pimpl) noexcept : impl_(std::move(pimpl)) {}
+client::client(client &&other) noexcept = default;
+client &client::operator=(client &&) noexcept = default;
+client::~client() noexcept = default;
+
+client::impl::impl(std::unique_ptr<detail::ev_loop> loop, std::string session_id, common::seq_num_t sequence_num) noexcept
+    : event_loop_(std::move(loop)), session_id_(std::move(session_id)), sequence_num_(sequence_num) {
+    ASSERT(event_loop_->thread().joinable());
+    ASSERT(session_id_.length() == common::msg_session_id_len);
+}
+
+std::error_code client::send(message_type type, std::span<const std::byte> payload) noexcept {
+    return impl_
+        ->send_impl(type, payload,
+                    [](detail::spsc_ringbuf &queue, size_t bytes) {
+                        auto *position = queue.write_prepare(bytes);
+                        DEBUG_ASSERT(position != nullptr);
+                        return position;
+                    })
+        .value();
+}
+
+std::error_code client::recv(message_type &type, std::span<std::byte> buffer, size_t &bytes) noexcept {
+    return impl_
+        ->recv_impl(type, buffer, bytes,
+                    [](detail::spsc_ringbuf &queue) {
+                        auto slot = queue.read_prepare();
+                        DEBUG_ASSERT(!slot.empty());
+                        DEBUG_ASSERT(slot.size() > sizeof(common::msg_header));
+                        return slot;
+                    })
+        .value();
+}
+
+std::optional<std::error_code> client::try_send(message_type type, std::span<const std::byte> payload) noexcept {
+    return impl_->send_impl(type, payload,
+                            [](detail::spsc_ringbuf &queue, size_t bytes) { return queue.write_try_prepare(bytes); });
+}
+
+std::optional<std::error_code> client::try_recv(message_type &type, std::span<std::byte> buffer, size_t &bytes) noexcept {
+    return impl_->recv_impl(type, buffer, bytes, [](detail::spsc_ringbuf &queue) { return queue.read_try_prepare(); });
+}
+
+void client::disconnect() noexcept { impl_->event_loop_->thread().request_stop(); }
+bool client::connected() const noexcept { return impl_->event_loop_->connected(); }
+enum disconnect_reason client::disconnect_reason() const noexcept { return impl_->event_loop_->disconnect_reason(); }
+
+const std::string &client::session_id() const noexcept { return impl_->session_id_; }
+size_t client::sequence_num() const noexcept { return common::ts::get(impl_->sequence_num_); }
+
+// ============================================================================
+// Implementation.
+// ============================================================================
+template <typename AcquirePosition>
+std::optional<std::error_code> client::impl::send_impl(message_type type, std::span<const std::byte> payload,
+                                                       AcquirePosition acq_pos) {
+    // ----------------------------------------
+    // (1) Validate.
+    // ----------------------------------------
+    if (!event_loop_->connected()) {
+        return make_soupbin_error(errc::disconnected);
+    }
+
     if (type == message_type::none || type == message_type::sequenced) {
         return make_soupbin_error(errc::invalid_message_type);
     }
-    DEBUG_ASSERT(type == message_type::unsequenced || type == message_type::debug);
 
     if (payload.empty()) {
         return make_soupbin_error(errc::payload_too_small);
@@ -50,31 +109,54 @@ static std::error_code validate_send(message_type type, std::span<const std::byt
         return make_soupbin_error(errc::payload_too_large);
     }
 
+    DEBUG_ASSERT(type == message_type::unsequenced || type == message_type::debug);
+
+    // ----------------------------------------
+    // (2) Acquire, write, commit.
+    // ----------------------------------------
+    const size_t message_size = sizeof(common::msg_header) + payload.size();
+    auto *position = acq_pos(event_loop_->send_rb(), message_size);
+    if (position == nullptr) {
+        return std::nullopt;
+    }
+
+    auto *header = reinterpret_cast<common::msg_header *>(position);
+    header->length = htons(payload.size());
+    header->type = (type == message_type::unsequenced) ? common::mt_unsequenced : common::mt_debug;
+    std::memcpy(position + sizeof(*header), payload.data(), payload.size());
+
+    event_loop_->send_rb().write_commit(message_size);
     return {};
 }
 
-static std::error_code validate_recv(std::span<std::byte> buffer) {
+template <typename AcquireSlot>
+std::optional<std::error_code> client::impl::recv_impl(message_type &type, std::span<std::byte> buffer, size_t &bytes,
+                                                       AcquireSlot acq_slot) {
+    // ----------------------------------------
+    // (1) Validate.
+    // ----------------------------------------
+    if (!event_loop_->connected()) {
+        return make_soupbin_error(errc::disconnected);
+    }
+
     if (buffer.size() < common::max_payload_size) {
         return make_soupbin_error(errc::buffer_too_small);
     }
 
-    return {};
-}
+    // ----------------------------------------
+    // (2) Acquire, read, commit.
+    // ----------------------------------------
+    auto slot = acq_slot(event_loop_->recv_rb());
+    if (slot.empty()) {
+        return std::nullopt;
+    }
 
-static void write_message(std::byte *queue_position, message_type type, std::span<const std::byte> payload) {
-    auto *header = reinterpret_cast<common::msg_header *>(queue_position);
-    header->length = htons(payload.size());
-    header->type = (type == message_type::unsequenced) ? common::mt_unsequenced : common::mt_debug;
-    std::memcpy(queue_position + sizeof(*header), payload.data(), payload.size());
-}
-
-static void read_message(std::span<const std::byte> queue_slot, message_type &type, std::span<std::byte> buffer,
-                         size_t &bytes) {
-    const auto *header = reinterpret_cast<const common::msg_header *>(queue_slot.data());
+    const auto *header = reinterpret_cast<const common::msg_header *>(slot.data());
     const size_t payload_size = ntohs(header->length);
+    const size_t message_size = sizeof(common::msg_header) + payload_size;
 
     DEBUG_ASSERT(payload_size <= common::max_payload_size);
-    DEBUG_ASSERT(queue_slot.size() >= sizeof(common::msg_header) + payload_size);
+    DEBUG_ASSERT(slot.size() >= message_size);
 
     switch (header->type) {
     case common::mt_debug:
@@ -85,7 +167,9 @@ static void read_message(std::span<const std::byte> queue_slot, message_type &ty
         break;
     case common::mt_sequenced:
         type = message_type::sequenced;
+        sequence_num_++;
         break;
+
     case common::mt_server_heartbeat:
     case common::mt_login_accepted:
     case common::mt_login_rejected:
@@ -96,111 +180,12 @@ static void read_message(std::span<const std::byte> queue_slot, message_type &ty
         ASSERT_UNREACHABLE();
         break;
     }
-
-    std::memcpy(buffer.data(), queue_slot.data() + sizeof(*header), payload_size);
+    std::memcpy(buffer.data(), slot.data() + sizeof(*header), payload_size);
     bytes = payload_size;
-}
 
-// ============================================================================
-// Declarations.
-// ============================================================================
-client::client(std::unique_ptr<impl> pimpl) noexcept : impl_(std::move(pimpl)) {}
-client::client(client &&other) noexcept = default;
-client &client::operator=(client &&) noexcept = default;
-client::~client() noexcept = default;
-
-std::error_code client::send(message_type type, std::span<const std::byte> payload) noexcept {
-    return impl_->send(type, payload);
-}
-
-std::error_code client::recv(message_type &type, std::span<std::byte> buffer, size_t &bytes) noexcept {
-    return impl_->recv(type, buffer, bytes);
-}
-
-std::optional<std::error_code> client::try_send(message_type type, std::span<const std::byte> payload) noexcept {
-    return impl_->try_send(type, payload);
-}
-
-std::optional<std::error_code> client::try_recv(message_type &type, std::span<std::byte> buffer, size_t &bytes) noexcept {
-    return impl_->try_recv(type, buffer, bytes);
-}
-
-bool client::disconnect() noexcept { return impl_->disconnect(); }
-bool client::connected() const noexcept { return impl_->connected(); }
-
-std::error_code client::error() const noexcept { return impl_->error(); }
-const std::string &client::session_id() const noexcept { return impl_->session_id(); }
-size_t client::sequence_num() const noexcept { return impl_->sequence_num(); }
-
-// ============================================================================
-// Definitons.
-// ============================================================================
-client::impl::impl(std::unique_ptr<detail::ev_loop> loop, std::string session_id, common::seq_num_t sequence_num)
-    : loop_(std::move(loop)), session_id_(std::move(session_id)), sequence_num_(sequence_num) {
-    ASSERT(loop_->thread().joinable());
-    ASSERT(session_id_.length() == common::msg_session_id_len);
-}
-
-std::error_code client::impl::send(message_type type, std::span<const std::byte> payload) noexcept {
-    if (auto err = validate_send(type, payload)) {
-        return err;
-    }
-
-    auto *queue_position = loop_->send().write_prepare(sizeof(common::msg_header) + payload.size());
-    write_message(queue_position, type, payload);
-    loop_->send().write_commit(sizeof(common::msg_header) + payload.size());
-
+    event_loop_->recv_rb().read_commit(message_size);
     return {};
 }
-
-std::error_code client::impl::recv(message_type &type, std::span<std::byte> buffer, size_t &bytes) noexcept {
-    if (auto err = validate_recv(buffer)) {
-        return err;
-    }
-
-    auto queue_slot = loop_->recv().read_prepare();
-    DEBUG_ASSERT(!queue_slot.empty());
-    DEBUG_ASSERT(queue_slot.size() > sizeof(common::msg_header));
-    read_message(queue_slot, type, buffer, bytes);
-    loop_->recv().read_commit(sizeof(common::msg_header) + bytes);
-
-    return {};
-}
-
-std::optional<std::error_code> client::impl::try_send(message_type type, std::span<const std::byte> payload) noexcept {
-    if (auto err = validate_send(type, payload)) {
-        return err;
-    }
-
-    auto *queue_position = loop_->send().write_try_prepare(sizeof(common::msg_header) + payload.size());
-    if (queue_position == nullptr) {
-        return std::nullopt;
-    }
-    write_message(queue_position, type, payload);
-    loop_->send().write_commit(sizeof(common::msg_header) + payload.size());
-
-    return {};
-}
-
-std::optional<std::error_code> client::impl::try_recv(message_type &type, std::span<std::byte> buffer,
-                                                      size_t &bytes) noexcept {
-    if (auto err = validate_recv(buffer)) {
-        return err;
-    }
-
-    auto queue_slot = loop_->recv().read_try_prepare();
-    if (queue_slot.empty()) {
-        return std::nullopt;
-    }
-    DEBUG_ASSERT(queue_slot.size() > sizeof(common::msg_header));
-    read_message(queue_slot, type, buffer, bytes);
-    loop_->recv().read_commit(sizeof(common::msg_header) + bytes);
-
-    return {};
-}
-
-bool client::impl::disconnect() noexcept { return loop_->thread().request_stop(); }
-bool client::impl::connected() const noexcept { return !loop_->thread().get_stop_source().stop_requested(); }
 
 // ============================================================================
 // Factory.
@@ -316,6 +301,7 @@ std::expected<client, std::error_code> client::connect(const connect_config &cfg
             return std::unexpected(make_soupbin_error(errc::no_such_login));
         case common::rej_no_session:
             return std::unexpected(make_soupbin_error(errc::no_such_session));
+
         default:
             FUZZ_UNREACHABLE();
             return std::unexpected(make_soupbin_error(errc::protocol));
@@ -341,14 +327,14 @@ std::expected<client, std::error_code> client::connect(const connect_config &cfg
         auto rb_send = detail::spsc_ringbuf::create(detail::send_queue_size);
         if (!rb_send) {
             LOG_CRITICAL("failed to create send queue.", std::strerror(errno));
-            common::preserving_close(cfd);
+            close(cfd);
             return std::unexpected(rb_send.error());
         }
 
         auto rb_recv = detail::spsc_ringbuf::create(detail::recv_queue_size);
         if (!rb_recv) {
             LOG_CRITICAL("failed to create recv queue.", std::strerror(errno));
-            common::preserving_close(cfd);
+            close(cfd);
             return std::unexpected(rb_recv.error());
         }
 
@@ -358,7 +344,7 @@ std::expected<client, std::error_code> client::connect(const connect_config &cfg
             ev_loop->start_thread();
         } catch (const std::system_error &e) {
             LOG_CRITICAL("failed to start event loop thread.", std::strerror(errno));
-            common::preserving_close(cfd);
+            close(cfd);
             return std::unexpected(e.code());
         }
 
@@ -366,7 +352,7 @@ std::expected<client, std::error_code> client::connect(const connect_config &cfg
     }
 
     default:
-        common::preserving_close(cfd);
+        close(cfd);
         FUZZ_UNREACHABLE();
         return std::unexpected(make_soupbin_error(errc::protocol));
     }

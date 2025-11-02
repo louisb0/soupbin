@@ -28,7 +28,8 @@ struct valid_fd_t
 struct seq_num_t
     : ts::strong_typedef<seq_num_t, uint64_t>,
       ts::strong_typedef_op::equality_comparison<seq_num_t>,
-      ts::strong_typedef_op::relational_comparison<seq_num_t> {
+      ts::strong_typedef_op::relational_comparison<seq_num_t>,
+      ts::strong_typedef_op::increment<seq_num_t> {
     using strong_typedef::strong_typedef;
 };
 

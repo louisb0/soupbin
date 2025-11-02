@@ -267,6 +267,8 @@ void client_manager::process(cm_batch_context &ctx) noexcept {
                 ctx.mark_drop(client.descriptor.handle, *failed);
                 continue;
             }
+
+            last_send = now;
         }
     }
 

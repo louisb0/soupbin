@@ -20,4 +20,8 @@ const msg_server_heartbeat msg_server_heartbeat::prebuilt = {
     .hdr = { .length = htons(0), .type = mt_server_heartbeat },
 };
 
+const msg_client_heartbeat msg_client_heartbeat::prebuilt = {
+    .hdr = { .length = htons(0), .type = mt_client_heartbeat },
+};
+
 } // namespace soupbin::common

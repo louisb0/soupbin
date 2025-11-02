@@ -18,7 +18,7 @@ add_library(soupbin::client ALIAS soupbin_client)
 
 target_sources(soupbin_client
     PRIVATE
-        src/client.cpp
+        src/client_impl.cpp
         src/detail/spsc_ringbuf.cpp
         src/detail/event_loop.cpp
 )

@@ -20,17 +20,14 @@ IncludeCategories:
   - Regex: '^"common/'
     Priority: 30
 
-  - Regex: '^"(client|server)\.hpp"$'
+  - Regex: '^"'
     Priority: 40
 
-  - Regex: '^"'
+  - Regex: '^<[^.]*>$'
     Priority: 50
 
-  - Regex: '^<[^.]*>$'
+  - Regex: '^<.*\.h>$'
     Priority: 60
 
-  - Regex: '^<.*\.h>$'
-    Priority: 70
-
   - Regex: '.*'
-    Priority: 80
+    Priority: 70

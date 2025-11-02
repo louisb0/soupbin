@@ -1,10 +1,9 @@
 #pragma once
 
 #include "detail/config.hpp"
-#include "detail/partial.hpp"
 #include "detail/types.hpp"
 
-#include "common/config.hpp"
+#include "common/partial.hpp"
 #include "common/types.hpp"
 
 #include <array>
@@ -33,7 +32,7 @@ struct cl_descriptor {
 struct cl_random_access {
     detail::session *session{ nullptr };
     cl_descriptor descriptor;
-    detail::partial<common::max_message_size> partial{};
+    common::partial partial{};
 
     [[nodiscard]] bool authed() const noexcept { return session != nullptr; }
 };

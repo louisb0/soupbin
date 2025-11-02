@@ -43,6 +43,7 @@ private:
     [[nodiscard]] std::byte *primary() const noexcept { return base_; }
     [[nodiscard]] std::byte *mirror() const noexcept { return base_ + capacity_; }
 
+    // TODO: Redundancy.
     [[nodiscard]] static bool empty(size_t read_cursor, size_t write_cursor) noexcept { return read_cursor == write_cursor; }
     [[nodiscard]] static size_t size(size_t read_cursor, size_t write_cursor) noexcept { return write_cursor - read_cursor; }
 };
