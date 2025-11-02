@@ -1,6 +1,7 @@
-#include "soupbin/server.hpp"
+#include "server_impl.hpp"
 
 #include "soupbin/errors.hpp"
+#include "soupbin/server.hpp"
 
 #include "detail/client_manager.hpp"
 #include "detail/config.hpp"
@@ -15,8 +16,6 @@
 #include "common/partial.hpp"
 #include "common/types.hpp"
 #include "common/util.hpp"
-
-#include "server.hpp"
 
 #include <algorithm>
 #include <array>
@@ -44,7 +43,6 @@
 
 // TODO:
 //  - Revisit logs, transition to structured (https://github.com/gabime/spdlog/issues/1797).
-//  - Reconsider value of strong types (e.g. client_count_t, seq_num_t).
 //  - Rework pre-commit / devenv.
 //  - cdomment seapartors ott
 //  - pinning / tuning / hugepages
@@ -52,30 +50,20 @@
 
 namespace soupbin {
 
-// ============================================================================
-// Declarations.
-// ============================================================================
-
 server::server(std::unique_ptr<impl> pimpl) noexcept : impl_(std::move(pimpl)) {}
 server::server(server &&other) noexcept = default;
 server &server::operator=(server &&) noexcept = default;
 server::~server() noexcept = default;
 
-void server::run() noexcept { impl_->run(); }
-
 // ============================================================================
-// Definitions.
+// Implementation.
 // ============================================================================
-
-server::impl::impl(common::valid_fd_t listener, common::valid_fd_t epoll, server_config &&cfg) noexcept
-    : cmgr_(epoll, listener), cfg_(std::move(cfg)) {}
-
-void server::impl::run() noexcept {
+void server::run() noexcept {
     while (true) {
-        detail::cm_batch_context ctx = cmgr_.poll(std::chrono::milliseconds(detail::poll_ms));
+        detail::cm_batch_context ctx = impl_->cmgr_.poll(std::chrono::milliseconds(detail::poll_ms));
 
-        batch_unauthed(ctx);
-        batch_authed(ctx);
+        impl_->batch_unauthed(ctx);
+        impl_->batch_authed(ctx);
 
         for (const auto *client : ctx.all()) {
             if (client->authed()) {
@@ -83,10 +71,10 @@ void server::impl::run() noexcept {
             }
         }
 
-        cmgr_.process(ctx);
-        cmgr_.onboard(detail::client_count_t{ detail::max_pb_new_clients });
+        impl_->cmgr_.process(ctx);
+        impl_->cmgr_.onboard(detail::client_count_t{ detail::max_pb_new_clients });
 
-        assert_consistency();
+        impl_->assert_consistency();
     }
 }
 
@@ -450,7 +438,6 @@ void server::impl::assert_consistency() const noexcept {
 // ============================================================================
 // Factory.
 // ============================================================================
-
 // TODO: logs
 std::expected<server, std::error_code> server::create(server_config cfg) noexcept {
     if (cfg.hostname.empty()) {

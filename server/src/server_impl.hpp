@@ -13,8 +13,11 @@
 namespace soupbin {
 
 class server::impl {
+    friend class server;
+
 public:
-    [[nodiscard]] impl(common::valid_fd_t listener, common::valid_fd_t epoll, server_config &&cfg) noexcept;
+    [[nodiscard]] impl(common::valid_fd_t listener, common::valid_fd_t epoll, server_config &&cfg) noexcept
+        : cmgr_(epoll, listener), cfg_(std::move(cfg)) {}
 
     impl(const impl &) = delete;
     impl &operator=(const impl &) = delete;

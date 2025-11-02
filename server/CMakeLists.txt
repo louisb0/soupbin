@@ -21,7 +21,7 @@ add_library(soupbin::server ALIAS soupbin_server)
 
 target_sources(soupbin_server
     PRIVATE
-        src/server.cpp
+        src/server_impl.cpp
         src/detail/client_manager.cpp
         src/detail/session.cpp
 )
